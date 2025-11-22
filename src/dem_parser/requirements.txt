@@ -1,0 +1,12 @@
+demoparser2==0.40.2
+numpy==2.3.5
+pandas==2.3.3
+polars==1.35.2
+polars-runtime-32==1.35.2
+protobuf==6.33.1
+pyarrow==22.0.0
+python-dateutil==2.9.0.post0
+pytz==2025.2
+six==1.17.0
+tqdm==4.67.1
+tzdata==2025.2

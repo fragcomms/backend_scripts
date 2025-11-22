@@ -4,5 +4,5 @@ __pycache__/
 *.pyo
 *.pyd
 .env
-.venv/
-the-mongolz-vs-astralis-m1-nuke.dem
+.venv
+*.dem
