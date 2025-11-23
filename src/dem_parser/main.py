@@ -1,6 +1,6 @@
 from demoparser2 import DemoParser
 
-parser = DemoParser("furia-vs-falcons-m1-inferno.dem")
+parser = DemoParser("furia-vs-falcons-m1-inferno-11-16.dem")
 
 event_names = parser.list_game_events()
 
@@ -17,4 +17,4 @@ event_names = parser.list_game_events()
 events = parser.parse_events(["begin_new_match", "round_announce_match_start"])
 
 for event in events:
-    print(f"Event: {event[0]}, Tick: {event[1]}")
+  print(f"Event: {event[0]}, Tick: {event[1]}")
