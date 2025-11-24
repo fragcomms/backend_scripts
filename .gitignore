@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
-.venv
+*.env
+*.venv
 *.dem
+*.log
