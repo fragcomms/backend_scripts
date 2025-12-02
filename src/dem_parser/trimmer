@@ -1,0 +1,45 @@
+#This trims the repeated X and Y values from all the csvs in the "players" folder
+import os
+import pandas as pd
+
+PLAYERS_DIR = "players"
+
+def process_csv(path: str) -> None:
+    print(f"Processing: {path}")
+
+    df = pd.read_csv(path)
+
+    if not {"X", "Y"}.issubset(df.columns):
+        print(f"  Skipping {path}: missing X and/or Y columns")
+        return
+
+    # Shift to compare with previous row
+    prev_X = df["X"].shift(1)
+    prev_Y = df["Y"].shift(1)
+
+    # Keep rows where X or Y changed (or it's the first row)
+    changed_mask = (df["X"] != prev_X) | (df["Y"] != prev_Y)
+    filtered_df = df[changed_mask].copy()
+
+    print(f"  Original rows: {len(df)}, kept: {len(filtered_df)}")
+
+    # Overwrite the same file
+    filtered_df.to_csv(path, index=False)
+
+def main():
+    if not os.path.isdir(PLAYERS_DIR):
+        print(f"Error: directory '{PLAYERS_DIR}' does not exist")
+        return
+
+    for name in os.listdir(PLAYERS_DIR):
+        if not name.lower().endswith(".csv"):
+            continue
+
+        full_path = os.path.join(PLAYERS_DIR, name)
+        if os.path.isfile(full_path):
+            process_csv(full_path)
+
+    print("Done processing all CSVs in 'players/'.")
+
+if __name__ == "__main__":
+    main()
