@@ -7,13 +7,15 @@ from google.protobuf.reflection import GeneratedProtocolMessageType
 k_EMsgGCClientWelcome = 4004
 k_EMsgGCClientHello = 4006
 k_EMsgGCClientConnectionStatus = 4009
-k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo = 9126
-k_EMsgGCCStrike15_v2_MatchList = 9127
-k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello = 9173
+k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo = 9147
+k_EMsgGCCStrike15_v2_MatchList = 9139
+k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello = 9109
 
 # --- Type Constants (Standard Protobuf) ---
 TYPE_UINT64 = 4
 TYPE_INT32 = 5
+TYPE_STRING = 9
+TYPE_MESSAGE = 11
 TYPE_BYTES = 12
 TYPE_UINT32 = 13
 
@@ -21,7 +23,8 @@ TYPE_UINT32 = 13
 CPPTYPE_INT32 = 1
 CPPTYPE_UINT32 = 3
 CPPTYPE_UINT64 = 4
-CPPTYPE_STRING = 9 # Used for both STRING and BYTES
+CPPTYPE_STRING = 9 
+CPPTYPE_MESSAGE = 10
 
 # Mapping Field Types to Cpp Types
 _TYPE_TO_CPP_TYPE = {
@@ -29,12 +32,14 @@ _TYPE_TO_CPP_TYPE = {
     TYPE_UINT32: CPPTYPE_UINT32,
     TYPE_UINT64: CPPTYPE_UINT64,
     TYPE_BYTES: CPPTYPE_STRING,
+    TYPE_STRING: CPPTYPE_STRING,   # <--- Added
+    TYPE_MESSAGE: CPPTYPE_MESSAGE,  # <--- Added
 }
 
 def _create_proto_class(name, fields_dict):
     """Helper to dynamically create a Protobuf class."""
     fields = []
-    for field_name, (index, field_type, label) in fields_dict.items():
+    for field_name, (index, field_type, label, nested_type) in fields_dict.items():
         # Look up the correct CppType based on the FieldType
         cpp_type_val = _TYPE_TO_CPP_TYPE.get(field_type, 0)
         
@@ -55,6 +60,8 @@ def _create_proto_class(name, fields_dict):
             extension_scope=None,
             options=None
         )
+        if field_type == TYPE_MESSAGE and nested_type:
+            fd.message_type = nested_type.DESCRIPTOR
         fields.append(fd)
 
     desc = Descriptor(
@@ -77,47 +84,59 @@ class gcmessages:
     """Container for CS2 GC Protobuf definitions."""
     
     # CMsgClientHello: field 1 = version (uint32)
+    # out
     CMsgClientHello = _create_proto_class('CMsgClientHello', {
-        'version': (1, TYPE_UINT32, 1),             
-        'client_session_need': (3, TYPE_UINT32, 1), 
-        'client_launcher': (4, TYPE_UINT32, 1)      
+        'version': (1, TYPE_UINT32, 1, None),             
     })
 
     # CMsgClientWelcome: field 1=version, 2=game_data (bytes), 4=game_data2 (bytes)
+    # in
     CMsgClientWelcome = _create_proto_class('CMsgClientWelcome', {
-        'version': (1, TYPE_UINT32, 1),
-        'game_data': (2, TYPE_BYTES, 1),
-        'game_data2': (4, TYPE_BYTES, 1)
-    })
-
-    # CMsgGCClientConnectionStatus: field 1=status (int32/enum)
-    CMsgGCClientConnectionStatus = _create_proto_class('CMsgGCClientConnectionStatus', {
-        'status': (1, TYPE_INT32, 1) 
-    })
-
-    # CMsgGCCStrike15_v2_MatchListRequestFullGameInfo
-    # Used for requesting demos via sharecode
-    CMsgGCCStrike15_v2_MatchListRequestFullGameInfo = _create_proto_class('CMsgGCCStrike15_v2_MatchListRequestFullGameInfo', {
-        'matchid': (1, TYPE_UINT64, 1),   
-        'outcomeid': (2, TYPE_UINT64, 1), 
-        'token': (3, TYPE_UINT32, 1)     
+        'version': (1, TYPE_UINT32, 1, None),
+        'game_data': (2, TYPE_BYTES, 1, None),
     })
     
     # nothing is required, just an acknowledgement that matchmaking is up and running
+    # in
     CMsgGCCStrike15_v2_MatchmakingGC2ClientHello = _create_proto_class('CMsgGCCStrike15_v2_MatchmakingGC2ClientHello', {})
+    
+    CMsgGCCStrike15_v2_MatchmakingServerRoundStats = _create_proto_class('CMsgGCCStrike15_v2_MatchmakingServerRoundStats', {
+        'map': (3, TYPE_STRING, 1, None),
+        'match_result': (11, TYPE_INT32, 1, None),
+        'match_duration': (15, TYPE_INT32, 1, None),
+    })
+    
+    CDataGCCStrike15_v2_MatchInfo = _create_proto_class('CDataGCCStrike15_v2_MatchInfo', {
+        'matchid': (1, TYPE_UINT64, 1, None),
+        'matchtime': (2, TYPE_UINT32, 1, None),
+        'roundstatsall': (5, TYPE_MESSAGE, 3, CMsgGCCStrike15_v2_MatchmakingServerRoundStats) 
+    })
+    
+    CMsgGCCStrike15_v2_MatchList = _create_proto_class('CMsgGCCStrike15_v2_MatchList', {
+        'msgrequestid': (1, TYPE_UINT32, 1, None),
+        'accountid': (2, TYPE_UINT32, 1, None),
+        'matches': (4, TYPE_MESSAGE, 3, CDataGCCStrike15_v2_MatchInfo)
+    })
+    
+    CMsgGCCStrike15_v2_MatchListRequestFullGameInfo = _create_proto_class('CMsgGCCStrike15_v2_MatchListRequestFullGameInfo', {
+        'matchid': (1, TYPE_UINT64, 1, None),   
+        'outcomeid': (2, TYPE_UINT64, 1, None), 
+        'token': (3, TYPE_UINT32, 1, None)     
+    })
 
 # Mapping of EMsg IDs to the Protobuf Class
 _PROTO_MAP = {
     k_EMsgGCClientHello: gcmessages.CMsgClientHello,
     k_EMsgGCClientWelcome: gcmessages.CMsgClientWelcome,
-    k_EMsgGCClientConnectionStatus: gcmessages.CMsgGCClientConnectionStatus,
-    k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo: gcmessages.CMsgGCCStrike15_v2_MatchListRequestFullGameInfo,
     k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello: gcmessages.CMsgGCCStrike15_v2_MatchmakingGC2ClientHello,
+    k_EMsgGCCStrike15_v2_MatchList: gcmessages.CMsgGCCStrike15_v2_MatchList,
+    k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo: gcmessages.CMsgGCCStrike15_v2_MatchListRequestFullGameInfo,
 }
 
 def parse_gc_payload(emsg, payload):
     """Parses a GC payload based on the EMsg ID."""
-    proto_class = _PROTO_MAP.get(emsg) # emsg should be unmasked
+    # emsg should already come unmasked, meaning & 0x7FFFFFFF
+    proto_class = _PROTO_MAP.get(emsg)
     if proto_class:
         msg = proto_class()
         try:

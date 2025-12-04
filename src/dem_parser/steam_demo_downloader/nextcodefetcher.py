@@ -20,7 +20,7 @@ def get_next_share_code(target_steamid, auth_code, last_known_share_code):
     code = response.status_code
 
     if code == 200:
-        return response.json()["result"]
+        return response.json()['result']['nextcode']
     elif code == 412:
         # TODO: return invalid share code
         return None
