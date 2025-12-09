@@ -1,5 +1,6 @@
 node_modules
 __pycache__/
+src/dem_parser/output/
 *.pyc
 *.pyo
 *.pyd
