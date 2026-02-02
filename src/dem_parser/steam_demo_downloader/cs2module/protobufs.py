@@ -1,148 +1,125 @@
-import logging
-from google.protobuf.descriptor import FieldDescriptor, Descriptor
-from google.protobuf.message import Message
-from google.protobuf.reflection import GeneratedProtocolMessageType
+import sys
+import shutil
+import re
+from pathlib import Path
+from grpc_tools import protoc
 
-# --- ID Constants ---
-k_EMsgGCClientWelcome = 4004
-k_EMsgGCClientHello = 4006
-k_EMsgGCClientConnectionStatus = 4009
-k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo = 9147
-k_EMsgGCCStrike15_v2_MatchList = 9139
-k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello = 9109
+# --- Configuration ---
+CUSTOM_PACKAGE = "valve_pbuf"
 
-# --- Type Constants (Standard Protobuf) ---
-TYPE_UINT64 = 4
-TYPE_INT32 = 5
-TYPE_STRING = 9
-TYPE_MESSAGE = 11
-TYPE_BYTES = 12
-TYPE_UINT32 = 13
+# --- 1. Root Discovery ---
+def find_project_root(start_path: Path) -> Path:
+    root_markers = {"src", ".git", "pyproject.toml"}
+    current = start_path
+    for _ in range(6):
+        if any((current / marker).exists() for marker in root_markers):
+            return current
+        if current.parent == current: break
+        current = current.parent
+    # Only print if we crash
+    print("Error: Could not find project root.", file=sys.stderr)
+    sys.exit(1)
 
-# --- CppType Constants (Must match google.protobuf.descriptor) ---
-CPPTYPE_INT32 = 1
-CPPTYPE_UINT32 = 3
-CPPTYPE_UINT64 = 4
-CPPTYPE_STRING = 9 
-CPPTYPE_MESSAGE = 10
+SCRIPT_PATH = Path(__file__).resolve()
+PROJECT_ROOT = find_project_root(SCRIPT_PATH.parent)
 
-# Mapping Field Types to Cpp Types
-_TYPE_TO_CPP_TYPE = {
-    TYPE_INT32: CPPTYPE_INT32,
-    TYPE_UINT32: CPPTYPE_UINT32,
-    TYPE_UINT64: CPPTYPE_UINT64,
-    TYPE_BYTES: CPPTYPE_STRING,
-    TYPE_STRING: CPPTYPE_STRING,   # <--- Added
-    TYPE_MESSAGE: CPPTYPE_MESSAGE,  # <--- Added
-}
+# --- 2. Paths ---
+REPO_ROOT = PROJECT_ROOT / "external" / "protobufs"
+PROTO_SRC_DIR = REPO_ROOT / "csgo"
+OUTPUT_DIR = SCRIPT_PATH.parent
+TEMP_BUILD_DIR = PROJECT_ROOT / "temp_proto_build"
 
-def _create_proto_class(name, fields_dict):
-    """Helper to dynamically create a Protobuf class."""
-    fields = []
-    for field_name, (index, field_type, label, nested_type) in fields_dict.items():
-        # Look up the correct CppType based on the FieldType
-        cpp_type_val = _TYPE_TO_CPP_TYPE.get(field_type, 0)
+FILES_TO_COMPILE = [
+    "cstrike15_gcmessages.proto",
+    "gcsdk_gcmessages.proto",
+    "engine_gcmessages.proto",
+    "steammessages.proto"
+]
+
+def needs_rebuild() -> bool:
+    """Checks if source protos are newer than generated python files."""
+    if not OUTPUT_DIR.exists():
+        return True
+    
+    generated_files = list(OUTPUT_DIR.glob("*_pb2.py"))
+    if not generated_files or len(generated_files) < len(FILES_TO_COMPILE):
+        return True
         
-        fd = FieldDescriptor(
-            name=field_name,
-            full_name=f'{name}.{field_name}',
-            index=index - 1,
-            number=index,
-            type=field_type,
-            cpp_type=cpp_type_val,
-            label=label,
-            has_default_value=False,
-            default_value=None,
-            message_type=None, 
-            enum_type=None, 
-            containing_type=None,
-            is_extension=False, 
-            extension_scope=None,
-            options=None
+    oldest_gen_time = min(f.stat().st_mtime for f in generated_files)
+    
+    for fname in FILES_TO_COMPILE:
+        src = PROTO_SRC_DIR / fname
+        if not src.exists(): continue
+        if src.stat().st_mtime > oldest_gen_time:
+            return True
+            
+    return False
+
+def prepare_file(src_path: Path, dest_path: Path):
+    """Injects package and fixes references."""
+    try:
+        content = src_path.read_text(encoding='utf-8', errors='ignore')
+        # Remove existing package
+        content = re.sub(r'^package\s+[\w\.]+;', '', content, flags=re.MULTILINE)
+        # Inject custom package
+        new_content = f'package {CUSTOM_PACKAGE};\n' + content
+        # Strip leading dots from types to fix internal references
+        new_content = re.sub(r'([ \(\)=])\.([A-Z])', r'\1\2', new_content)
+        dest_path.write_text(new_content, encoding='utf-8')
+    except Exception as e:
+        print(f"Failed to prepare {src_path.name}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def fix_imports(output_dir: Path):
+    """Generic import fixer for any generated _pb2.py file."""
+    for py_file in output_dir.glob("*_pb2.py"):
+        content = py_file.read_text(encoding='utf-8')
+        
+        # Regex: Change "import x_pb2" to "from . import x_pb2"
+        new_content = re.sub(
+            r'^import (\w+_pb2) as', 
+            r'from . import \1 as', 
+            content, 
+            flags=re.MULTILINE
         )
-        if field_type == TYPE_MESSAGE and nested_type:
-            fd.message_type = nested_type.DESCRIPTOR
-        fields.append(fd)
+        
+        if content != new_content:
+            py_file.write_text(new_content, encoding='utf-8')
 
-    desc = Descriptor(
-        name=name,
-        full_name=name,
-        filename=None,
-        containing_type=None,
-        fields=fields,
-        nested_types=[],
-        enum_types=[],
-        extensions=[],
-        options=None,
-        is_extendable=False,
-        syntax='proto2'
-    )
-    
-    return GeneratedProtocolMessageType(name, (Message,), {'DESCRIPTOR': desc})
+def build(force=False):
+    # 1. Compile only if needed
+    if force or needs_rebuild():
+        if not PROTO_SRC_DIR.exists():
+            print(f"Error: Protobuf source not found at: {PROTO_SRC_DIR}", file=sys.stderr)
+            sys.exit(1)
 
-class gcmessages:
-    """Container for CS2 GC Protobuf definitions."""
-    
-    # CMsgClientHello: field 1 = version (uint32)
-    # out
-    CMsgClientHello = _create_proto_class('CMsgClientHello', {
-        'version': (1, TYPE_UINT32, 1, None),             
-    })
+        if TEMP_BUILD_DIR.exists(): shutil.rmtree(TEMP_BUILD_DIR)
+        TEMP_BUILD_DIR.mkdir(parents=True)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # CMsgClientWelcome: field 1=version, 2=game_data (bytes), 4=game_data2 (bytes)
-    # in
-    CMsgClientWelcome = _create_proto_class('CMsgClientWelcome', {
-        'version': (1, TYPE_UINT32, 1, None),
-        'game_data': (2, TYPE_BYTES, 1, None),
-    })
-    
-    # nothing is required, just an acknowledgement that matchmaking is up and running
-    # in
-    CMsgGCCStrike15_v2_MatchmakingGC2ClientHello = _create_proto_class('CMsgGCCStrike15_v2_MatchmakingGC2ClientHello', {})
-    
-    CMsgGCCStrike15_v2_MatchmakingServerRoundStats = _create_proto_class('CMsgGCCStrike15_v2_MatchmakingServerRoundStats', {
-        'map': (3, TYPE_STRING, 1, None),
-        'match_result': (11, TYPE_INT32, 1, None),
-        'match_duration': (15, TYPE_INT32, 1, None),
-    })
-    
-    CDataGCCStrike15_v2_MatchInfo = _create_proto_class('CDataGCCStrike15_v2_MatchInfo', {
-        'matchid': (1, TYPE_UINT64, 1, None),
-        'matchtime': (2, TYPE_UINT32, 1, None),
-        'roundstatsall': (5, TYPE_MESSAGE, 3, CMsgGCCStrike15_v2_MatchmakingServerRoundStats) 
-    })
-    
-    CMsgGCCStrike15_v2_MatchList = _create_proto_class('CMsgGCCStrike15_v2_MatchList', {
-        'msgrequestid': (1, TYPE_UINT32, 1, None),
-        'accountid': (2, TYPE_UINT32, 1, None),
-        'matches': (4, TYPE_MESSAGE, 3, CDataGCCStrike15_v2_MatchInfo)
-    })
-    
-    CMsgGCCStrike15_v2_MatchListRequestFullGameInfo = _create_proto_class('CMsgGCCStrike15_v2_MatchListRequestFullGameInfo', {
-        'matchid': (1, TYPE_UINT64, 1, None),   
-        'outcomeid': (2, TYPE_UINT64, 1, None), 
-        'token': (3, TYPE_UINT32, 1, None)     
-    })
+        for fname in FILES_TO_COMPILE:
+            prepare_file(PROTO_SRC_DIR / fname, TEMP_BUILD_DIR / fname)
 
-# Mapping of EMsg IDs to the Protobuf Class
-_PROTO_MAP = {
-    k_EMsgGCClientHello: gcmessages.CMsgClientHello,
-    k_EMsgGCClientWelcome: gcmessages.CMsgClientWelcome,
-    k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello: gcmessages.CMsgGCCStrike15_v2_MatchmakingGC2ClientHello,
-    k_EMsgGCCStrike15_v2_MatchList: gcmessages.CMsgGCCStrike15_v2_MatchList,
-    k_EMsgGCCStrike15_v2_MatchListRequestFullGameInfo: gcmessages.CMsgGCCStrike15_v2_MatchListRequestFullGameInfo,
-}
+        include_paths = [str(TEMP_BUILD_DIR), str(REPO_ROOT)]
+        proto_files = [str(TEMP_BUILD_DIR / f) for f in FILES_TO_COMPILE]
 
-def parse_gc_payload(emsg, payload):
-    """Parses a GC payload based on the EMsg ID."""
-    # emsg should already come unmasked, meaning & 0x7FFFFFFF
-    proto_class = _PROTO_MAP.get(emsg)
-    if proto_class:
-        msg = proto_class()
-        try:
-            msg.ParseFromString(payload)
-            return msg
-        except Exception as e:
-            logging.info(f"Error parsing proto for {emsg}: {e}")
-            return None
-    return None
+        command = [
+            'grpc_tools.protoc',
+            f'-I{include_paths[0]}',
+            f'-I{include_paths[1]}',
+            f'--python_out={str(OUTPUT_DIR)}',
+        ] + proto_files
+
+        exit_code = protoc.main(command)
+        shutil.rmtree(TEMP_BUILD_DIR)
+
+        if exit_code != 0:
+            print("Error: Protobuf compilation failed.", file=sys.stderr)
+            sys.exit(exit_code)
+
+    # 2. Patch imports ALWAYS (Fast & Safe)
+    fix_imports(OUTPUT_DIR)
+
+if __name__ == "__main__":
+    force_rebuild = "--force" in sys.argv
+    build(force=force_rebuild)
