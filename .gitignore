@@ -1,4 +1,3 @@
-node_modules
 __pycache__/
 src/dem_parser/output/
 *.pyc
@@ -8,3 +7,6 @@ src/dem_parser/output/
 *.venv
 *.dem
 *.log
+src/dem_parser/steam_demo_downloader/cs2module/*
+!src/dem_parser/steam_demo_downloader/cs2module/cs2client.py
+!src/dem_parser/steam_demo_downloader/cs2module/protobufs.py

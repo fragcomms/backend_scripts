@@ -8,13 +8,13 @@ class CS2Client(GameCoordinator):
     def __init__(self, steam):
         GameCoordinator.__init__(self, steam, 730) # 730 is csgo id, same as cs2
         self.target_match_code = None
-        self.PROTO_MAP = {
+        self.PROTO_MAP = { # these two are the only relevant ones for now
             4004: gcsdk_protos.CMsgClientWelcome,
             9139: cstrike_protos.CMsgGCCStrike15_v2_MatchList
         }
         
     def set_target_match(self, sharecode):
-        from csgo.sharecode import decode
+        from csgo.sharecode import decode # add decode in here as its the only function that requires it
         self.target_match_code = decode(sharecode)
         
     def request_match_info(self):
@@ -37,11 +37,9 @@ class CS2Client(GameCoordinator):
 
         if clean_id in self.PROTO_MAP:
             try:
-                # Instantiate the correct class
                 proto_class = self.PROTO_MAP[clean_id]
                 parsed_msg = proto_class()
                 
-                # Parse the raw bytes
                 parsed_msg.ParseFromString(body)
                 
                 logging.debug(f"GC Message {clean_id} parsed successfully.")
@@ -55,7 +53,6 @@ class CS2Client(GameCoordinator):
         return super()._process_gc_message(emsg, header, body)
 
     def send_hello(self):
-        # Use the Proto from the module
         hello = gcsdk_protos.CMsgClientHello()
         hello.version = 2000682  # CS2 version (grabbed the most modern one 11/23/2025)
         
