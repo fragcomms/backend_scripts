@@ -1,6 +1,7 @@
 import logging, time, os, gevent, sys
 from gevent.queue import Queue
 from gevent.event import AsyncResult
+from gevent.server import StreamServer
 from dotenv import load_dotenv
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python" # required for protobuf compilation
 from steam.client import SteamClient
@@ -27,13 +28,34 @@ sharecode = os.getenv("AARON_KNOWNCODE")
 # Setup logging AFTER getting sharecode otherwise risk of key leak
 logging.basicConfig(filename=f'{int(time.time())}.log',
                     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
-                    level=logging.DEBUG)
+                    level=logging.INFO)
 
 client = SteamClient()
 cs2 = CS2Client(client)
 
 request_queue = Queue()
 current_job_result = None
+match_links = None
+
+def handle_tcp_client(socket, address):
+    logging.info(f"External connection from {address}")
+    
+    fileobj = socket.makefile(mode='rb')
+    
+    while True:
+        # Wait for data
+        line = fileobj.readline()
+        
+        # If line is empty, client disconnected
+        if not line:
+            break
+            
+        sharecode = line.strip().decode('utf-8')
+        if sharecode:
+            logging.info(f"Received from external source: {sharecode}")
+            request_queue.put(sharecode)
+            
+    logging.info(f"Connection closed {address}")
 
 # the worker to get through the queue
 def worker_loop():
@@ -69,24 +91,23 @@ def process_match_data(sharecode, message):
     logging.info(f"Download Link: {message.matches[0].roundstatsall[-1].map}")
     logging.info(f"Time: {datetime.fromtimestamp(message.matches[0].matchtime).strftime('%Y-%m-%d %H:%M:%S')}")
 
-@client.on('logged_on')
+@client.on('logged_on') # for steam client
 def start_csgo():
     logging.info("Logged into Steam.")
     client.games_played([730]) # mimick bot playing cs2
     gevent.sleep(1) # sleep required as steam takes a while to register events
     cs2.send_hello()
-    gevent.sleep(1)
     
     # start worker loop
+    
+@cs2.on(4004) # welcomed
+def query_sharecode(*args):
+    logging.info(f"Welcomed by GC")
     gevent.spawn(worker_loop)
     # if sharecode:
     #     request_queue.put(sharecode)
     #     request_queue.put("CSGO-H4mYW-j8mEB-jwxyH-KBEeK-5b9eD")
     #     request_queue.put("CSGO-82VPt-Px2FC-ViiRG-3SaFk-tXvzF")
-    
-@cs2.on(4004) # welcomed
-def query_sharecode(*args):
-    logging.info(f"Welcomed by GC")
     
 @cs2.on(9139) # match list fetched
 def on_match_list(message):
@@ -101,5 +122,8 @@ def on_match_list(message):
     current_job_result.set(message)
 
 if __name__ == "__main__":
+    server = StreamServer(('127.0.0.1', 6000), handle_tcp_client)
+    server.start() # Starts in background
+    logging.info("TCP Server listening on 127.0.0.1:6000")
     client.cli_login(username=bot_user, password=bot_pw)
     client.run_forever()

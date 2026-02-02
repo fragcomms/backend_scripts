@@ -89,7 +89,6 @@ def fix_imports(output_dir: Path):
 
 """
 force=True to build irregardless of how old protobufs are
-
 """
 def build(force=False):
     if force or needs_rebuild():
