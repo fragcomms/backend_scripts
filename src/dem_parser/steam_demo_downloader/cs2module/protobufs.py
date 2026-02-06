@@ -32,7 +32,6 @@ FILES_TO_COMPILE = [
 
 # rebuilding takes time, we check to make sure files are good to go before building
 def needs_rebuild() -> bool:
-    """Checks if source protos are newer than generated python files."""
     if not OUTPUT_DIR.exists():
         return True
     
