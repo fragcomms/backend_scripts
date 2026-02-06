@@ -1,4 +1,4 @@
-import logging, time, os, gevent, sys
+import logging, time, os, gevent, sys, requests
 from gevent.queue import Queue
 from gevent.event import AsyncResult
 from gevent.server import StreamServer
@@ -28,7 +28,7 @@ sharecode = os.getenv("AARON_KNOWNCODE")
 # Setup logging AFTER getting sharecode otherwise risk of key leak
 logging.basicConfig(filename=f'{int(time.time())}.log',
                     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
-                    level=logging.INFO)
+                    level=logging.DEBUG)
 
 client = SteamClient()
 cs2 = CS2Client(client)
@@ -87,9 +87,26 @@ def process_match_data(sharecode, message):
     if not message.matches:
         logging.warning(f"No match found for {sharecode}")
         return
+    # logging.info(message)
     logging.info(f"Processed: [{sharecode}]")
     logging.info(f"Download Link: {message.matches[0].roundstatsall[-1].map}")
     logging.info(f"Time: {datetime.fromtimestamp(message.matches[0].matchtime).strftime('%Y-%m-%d %H:%M:%S')}")
+    download_replay(message.matches[0].roundstatsall[-1].map)
+    
+def download_replay(url, output_dir="replays"):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    logging.info(f"Starting download: {url}")
+    
+    with requests.get(url) as r:
+        r.raise_for_status()
+        filename = os.path.basename(url)
+        filepath = os.path.join(output_dir, filename)
+        with open(filepath, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+    logging.info(f"Download complete: {filepath}")
 
 @client.on('logged_on') # for steam client
 def start_csgo():
@@ -97,8 +114,6 @@ def start_csgo():
     client.games_played([730]) # mimick bot playing cs2
     gevent.sleep(1) # sleep required as steam takes a while to register events
     cs2.send_hello()
-    
-    # start worker loop
     
 @cs2.on(4004) # welcomed
 def query_sharecode(*args):
