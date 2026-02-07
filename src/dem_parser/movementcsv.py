@@ -24,7 +24,7 @@ match_start_tick = begin_new_match_df['tick'].iloc[0] if begin_new_match_df is n
 #find round 1 start tick (skip warmup if applicable)
 parse_rounds = parser.parse_event("round_start")
 r1_tick = parse_rounds['tick'].iloc[0] if parse_rounds is not None else 0
-print(f"Round 1 start tick: {r1_tick}")
+print(f"First tick: {r1_tick}")
 
 #find last tick of match
 all_ticks_df = parser.parse_ticks(["tick"])
@@ -35,6 +35,7 @@ print(f"Last tick: {max_tick}")
 
 #sampling interval for ticks (every 8) smooth movement that isn't too heavy on cpu
 tick_interval = 8
+tickrate = 64 # ticks per second, will use later to convert ticks to seconds
 wanted_ticks = list(range(r1_tick, max_tick + 1, tick_interval))
 
 
@@ -43,11 +44,11 @@ filtered_events = [(event_name, df[df['tick'] >= match_start_tick]) for event_na
 
 #wanted props for json, csv
 wanted_props = ["equipment_value_this_round", "cash_spent_this_round", "is_alive", "team_num", "player_name", "score", "player_steamid", "X", "Y"]
-csv_wanted_props = ["tick", "player_name", "player_steamid", "team_num", "is_alive", "health", "X", "Y", "pitch", "yaw"]
+csv_wanted_props = ["tick", "player_name", "player_steamid", "team_clan_name", "team_name", "is_alive", "health", "X", "Y", "Z", "yaw", "kills_total", "deaths_total", "team_num", "round_win_status"]
 
-#parse all
+#parse all player movements
 csv_ticks = parser.parse_ticks(csv_wanted_props, ticks=wanted_ticks)
-very_last_csv_tick = parser.parse_ticks(csv_wanted_props, ticks=[max_tick])
+last_csv_tick = parser.parse_ticks(csv_wanted_props, ticks=[max_tick])
 
 
 tick_values = set()
@@ -102,7 +103,7 @@ replay_json = {
 #write player movements to CSV
 csv_filepath = "output/player_movements.csv"
 csv_ticks = csv_ticks[csv_wanted_props]
-last_tick = very_last_csv_tick[csv_wanted_props]
+last_tick = last_csv_tick[csv_wanted_props]
 #csv_ticks = csv_ticks + last_tick
 
 print(last_tick)
