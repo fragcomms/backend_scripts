@@ -101,7 +101,7 @@ replay_json = {
 }
 
 #write player movements to CSV
-csv_filepath = "output/player_movements.csv"
+csv_filepath = "src/dem_parser/output/player_movements.csv"
 csv_ticks = csv_ticks[csv_wanted_props]
 last_tick = last_csv_tick[csv_wanted_props]
 #csv_ticks = csv_ticks + last_tick
@@ -117,9 +117,9 @@ print(f"Wrote {csv_filepath}")
 
 
 
-os.makedirs("output", exist_ok=True)
+os.makedirs("src/dem_parser/output", exist_ok=True)
 
-with open("output/replay.json", "w") as f:
+with open("src/dem_parser/output/replay.json", "w") as f:
     json.dump(replay_json, f, indent=2)
 
 print("Wrote output/replay.json")
