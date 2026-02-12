@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     
     yield # Hand over control to the application
 
-app = FastAPI(title="CS2 & Audio Orchestrator")
+app = FastAPI(title="CS2 & Audio Orchestrator", lifespan=lifespan)
 
 # --- Data Models ---
 class TranscriptRequest(BaseModel):
