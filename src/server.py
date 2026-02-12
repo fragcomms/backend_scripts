@@ -5,6 +5,7 @@ import time
 import sys
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import uvicorn
 
@@ -16,6 +17,23 @@ PARSER_SCRIPT = os.path.join(BASE_DIR, "dem_parser", "parser.py")
 DOWNLOADER_SCRIPT = os.path.join(BASE_DIR, "steam_demo_downloader", "demodownloader.py")
 DOWNLOADER_HOST = "127.0.0.1"
 DOWNLOADER_PORT = 6000
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # [STARTUP LOGIC] Code before yield runs on start
+    if not is_port_open(DOWNLOADER_HOST, DOWNLOADER_PORT):
+        print("Starting Steam Downloader Service...")
+        subprocess.Popen(
+            [sys.executable, DOWNLOADER_SCRIPT],
+            cwd=os.path.dirname(DOWNLOADER_SCRIPT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        time.sleep(2) # Give it time to initialize
+    else:
+        print("Steam Downloader Service is already running.")
+    
+    yield # Hand over control to the application
 
 app = FastAPI(title="CS2 & Audio Orchestrator")
 
@@ -65,27 +83,9 @@ def run_subprocess(command: list):
         return result.stdout
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.stderr}")
-        raise HTTPException(status_code=500, detail=f"Script failed: {e.stderr}")
+        raise HTTPException(status_code=500, detail=f"Script failed: {e.stderr}")       
 
-# --- Lifecycle ---
-
-@app.on("startup")
-async def startup_event():
-    """Launches the Steam Downloader if it isn't running."""
-    if not is_port_open(DOWNLOADER_HOST, DOWNLOADER_PORT):
-        print("Starting Steam Downloader Service...")
-        # Launch as independent process (detached)
-        subprocess.Popen(
-            [sys.executable, DOWNLOADER_SCRIPT],
-            cwd=os.path.dirname(DOWNLOADER_SCRIPT), # Run inside its own folder to find modules
-            stdout=subprocess.DEVNULL, # Redirect logs or keep them
-            stderr=subprocess.DEVNULL
-        )
-        time.sleep(2) # Give it time to login to Steam
-    else:
-        print("Steam Downloader Service is already running.")
-
-# --- Endpoints ---
+#routes
 
 @app.post("/download")
 async def trigger_download(req: DownloadRequest):
