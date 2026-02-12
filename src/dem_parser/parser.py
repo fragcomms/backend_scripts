@@ -4,6 +4,9 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TICK_INTERVAL = 12
 OUTPUT_FOLDER = os.getenv("PARSER_OUTPUT_DIR", "output")
