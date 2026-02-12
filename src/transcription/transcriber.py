@@ -28,6 +28,23 @@ def get_audio_track_count(file_path):
     except subprocess.CalledProcessError:
         print("Error: Could not determine audio tracks. Is ffprobe installed?")
         return
+      
+def get_track_title(file_path, track_index):
+    """Uses ffprobe to extract the 'title' metadata (User ID) from a specific track."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", f"a:{track_index}",
+            "-show_entries", "stream_tags=title",
+            "-of", "csv=p=0",
+            file_path
+        ]
+        output = subprocess.check_output(cmd, text=True).strip()
+        # Basic sanitization to ensure valid filename (alphanumeric + underscores/dashes)
+        # Discord IDs are just numbers, but this is safe fallback
+        return None
+    except Exception:
+        return None
 
 def extract_track(input_path, track_index, output_wav):
     """Extracts a specific audio track to a temp WAV file (16kHz mono)."""
@@ -73,10 +90,12 @@ def process_audio(audio_path, prompt=None):
     output_files = []
     
     for i in range(num_tracks):
-        print(f"\n=== Processing Track {i+1}/{num_tracks} ===")
+        user_id = get_track_title(audio_file, i)
+        track_identifier = user_id if user_id else f"track_{i+1}"
+        print(f"\n=== Processing Track {i+1}/{num_tracks} (ID: {track_identifier}) ===")
 
         # Create temp file for this track
-        temp_wav = os.path.join(os.path.dirname(audio_file), f"temp_track_{i}.wav")
+        temp_wav = os.path.join(os.path.dirname(audio_file), f"temp_{track_identifier}.wav")
 
         try:
             # Extract specific track
@@ -102,9 +121,9 @@ def process_audio(audio_path, prompt=None):
 
             # Save Result
             base_name = os.path.splitext(audio_file)[0]
-            output_file = f"{base_name}_track{i+1}.txt"
+            output_file = f"{track_identifier}.txt"
 
-            print(f"--- Writing Track {i+1} to file ---")
+            print(f"--- Writing to {os.path.basename(output_file)} ---")
             with open(output_file, "w", encoding="utf-8") as f:
                 for segment in result["segments"]:
                     start = round(segment['start'], 2)
@@ -132,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run WhisperX on multi-track audio.")
     parser.add_argument("audio_path", type=str, help="Absolute path to the audio file")
     parser.add_argument("prompt", type=str, nargs="?", default=None)
-    # ex: python3 main.py /ex/am/ple "this is an example"
+    # ex: python3 main.py /ex/am/ple 
     args = parser.parse_args()
 
     try:
