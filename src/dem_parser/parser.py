@@ -88,6 +88,8 @@ def parse_game_events(parser, match_start_tick):
     return processed_events
 
 def get_match_metadata(parser):
+    header = parser.parse_header()
+    map_name = header.get("map_name", "unknown")
     try:
         match_start_df = parser.parse_event("begin_new_match")
         start_tick = int(match_start_df['tick'].iloc[0]) if not match_start_df.empty else 0
@@ -105,7 +107,7 @@ def get_match_metadata(parser):
 
     max_tick_df = parser.parse_ticks(["tick"])
     end_tick = int(max_tick_df['tick'].max())
-    return start_tick, end_tick
+    return start_tick, end_tick, map_name
 
 def process_ticks(parser, start_tick, end_tick):
     wanted_ticks = np.arange(start_tick, end_tick + 1, TICK_INTERVAL)
@@ -195,29 +197,50 @@ def save_json(data, filename):
         json.dump(data, f, separators=(',', ':'))
         # json.dump(data, f, indent=1) # use if you need to understand how the structure is
     print("Done.")
+    return filepath
 
 def main():
     demo_path = get_demo_path()
+    base_filename = os.path.basename(demo_path)
+    
     parser = DemoParser(demo_path)
-    start_tick, end_tick = get_match_metadata(parser)
+    
+    # 1. FAST: Get Metadata immediately
+    print("Parsing Metadata...")
+    start_tick, end_tick, map_name = get_match_metadata(parser)
 
-    # Process ticks and get the player lookup table
+    meta_payload = {
+        "filename": base_filename,
+        "map": map_name,
+        "interval": TICK_INTERVAL,
+        "start": start_tick,
+        "end": end_tick
+    }
+
+    print("Writing metadata file...")
+    save_json({"meta": meta_payload}, f"{base_filename}_meta.json")
+
+    print("Processing Ticks & Events (this may take a while)...")
     ticks_data, player_lookup = process_ticks(parser, start_tick, end_tick)
     events_data = parse_game_events(parser, start_tick)
 
+    # 4. FINAL WRITE: Combine everything into the final JSON
     replay_json = {
-        "meta": {
-            "filename": os.path.basename(demo_path),
-            "interval": TICK_INTERVAL,
-            "start": start_tick,
-            "end": end_tick
-        },
-        "players": player_lookup, # Static data here
-        "timeline": ticks_data,   # Dynamic data here
+        "meta": meta_payload,
+        "players": player_lookup,
+        "timeline": ticks_data,
         "events": events_data
     }
 
-    save_json(replay_json, f"{os.path.basename(demo_path)}.json")
+    # Save the full replay (overwriting or creating a new file)
+    save_json(replay_json, f"{base_filename}.json")
+    
+    # delete meta file
+    # meta_path = os.path.join(OUTPUT_FOLDER, f"{base_filename}_meta.json")
+    # if os.path.exists(meta_path):
+    #     os.remove(meta_path)
+
+    # Cleanup demo file
     os.remove(demo_path)
 
 if __name__ == "__main__":
