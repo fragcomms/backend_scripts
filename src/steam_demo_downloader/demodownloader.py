@@ -1,4 +1,4 @@
-import logging, time, os, gevent, sys, requests
+import logging, time, os, gevent, sys, requests, bz2
 from gevent.queue import Queue
 from gevent.event import AsyncResult
 from gevent.server import StreamServer
@@ -23,7 +23,9 @@ load_dotenv()
 
 bot_user = os.getenv('BOT_USERNAME')
 bot_pw = os.getenv('BOT_PASSWORD')
-sharecode = os.getenv("AARON_KNOWNCODE")
+# sharecode = os.getenv("AARON_KNOWNCODE")
+DEMO_OUTPUT_DIR = os.getenv("DEMO_OUTPUT_DIR", "replays")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://127.0.0.1:8000")
 
 # Setup logging AFTER getting sharecode otherwise risk of key leak
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -96,21 +98,63 @@ def process_match_data(sharecode, message):
     logging.info(f"Time: {datetime.fromtimestamp(message.matches[0].matchtime).strftime('%Y-%m-%d %H:%M:%S')}")
     download_replay(message.matches[0].roundstatsall[-1].map)
     
-def download_replay(url, output_dir="replays"):
-    full_output_path = os.path.join(script_dir, output_dir)
+def download_replay(url, output_dir=DEMO_OUTPUT_DIR):
+    if os.path.isabs(output_dir):
+        full_output_path = output_dir
+    else:
+        full_output_path = os.path.join(script_dir, output_dir)
+        
     if not os.path.exists(full_output_path):
         os.makedirs(full_output_path)
         
     logging.info(f"Starting download: {url}")
     
-    with requests.get(url) as r:
+    bz2_filename = os.path.basename(url)
+    bz2_filepath = os.path.join(full_output_path, bz2_filename)
+    
+    with requests.get(url, stream=True) as r:
         r.raise_for_status()
-        filename = os.path.basename(url)
-        filepath = os.path.join(full_output_path, filename)
-        with open(filepath, 'wb') as f:
+        with open(bz2_filepath, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
-    logging.info(f"Download complete: {filepath}")
+    logging.info(f"Download complete: {bz2_filepath}")
+    
+    final_filename = os.path.splitext(bz2_filename)[0]
+    final_filepath = os.path.join(full_output_path, final_filename)
+    
+    logging.info(f"Decompressing to: {final_filepath}")
+    
+    try:
+        with bz2.open(bz2_filepath, "rb") as source, open(final_filepath, "wb") as dest:
+            for data in iter(lambda: source.read(100 * 1024), b""):
+                dest.write(data)
+        
+        logging.info("Decompression successful.")
+        os.remove(bz2_filepath) 
+        trigger_parser(final_filepath)
+        
+    except Exception as e:
+        logging.error(f"Failed to decompress {bz2_filepath}: {e}")
+
+def trigger_parser(demo_path):
+    """Sends a request to server.py to start parsing this file."""
+    url = f"{ORCHESTRATOR_URL}/parse"
+    
+    # We must use absolute path because server.py might be running from a different folder
+    payload = {"demo_path": os.path.abspath(demo_path)}
+    
+    try:
+        logging.info(f"Triggering parser for: {demo_path}")
+        # We use a short timeout so the downloader doesn't hang if the server is busy
+        resp = requests.post(url, json=payload, timeout=5)
+        
+        if resp.status_code == 200:
+            logging.info("Parser triggered successfully.")
+        else:
+            logging.error(f"Failed to trigger parser. Status: {resp.status_code} - {resp.text}")
+            
+    except Exception as e:
+        logging.error(f"Could not connect to orchestrator at {url}: {e}")
 
 @client.on('logged_on') # for steam client
 def start_csgo():

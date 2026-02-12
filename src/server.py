@@ -37,7 +37,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CS2 & Audio Orchestrator", lifespan=lifespan)
 
-# --- Data Models ---
 class TranscriptRequest(BaseModel):
     file_path: str
     prompt: Optional[str] = None
@@ -47,8 +46,6 @@ class ParseRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     sharecode: str
-
-# --- Helper Functions ---
 
 def is_port_open(host, port):
     """Checks if the downloader service is already running."""

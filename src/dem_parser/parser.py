@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 TICK_INTERVAL = 12
-OUTPUT_FOLDER = "output"
+OUTPUT_FOLDER = os.getenv("PARSER_OUTPUT_DIR", "output")
 
 def get_demo_path():
     if len(sys.argv) < 2:
@@ -175,10 +175,15 @@ def process_ticks(parser, start_tick, end_tick):
     return timeline, player_lookup
 
 def save_json(data, filename):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, OUTPUT_FOLDER)
+    if os.path.isabs(OUTPUT_FOLDER):
+        output_dir = OUTPUT_FOLDER
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, OUTPUT_FOLDER)
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+        
     filepath = os.path.join(output_dir, filename)
     
     print(f"Saving to {filepath}...")
@@ -210,6 +215,7 @@ def main():
     }
 
     save_json(replay_json, f"{os.path.basename(demo_path)}.json")
+    os.remove(demo_path)
 
 if __name__ == "__main__":
     main()
