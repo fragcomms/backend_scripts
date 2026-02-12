@@ -31,7 +31,7 @@ log_filename = f'{int(time.time())}.log'
 full_log_path = os.path.join(script_dir, log_filename)
 logging.basicConfig(filename=full_log_path,
                     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
-                    level=logging.DEBUG)
+                    level=logging.INFO)
 
 client = SteamClient()
 cs2 = CS2Client(client)
@@ -106,7 +106,7 @@ def download_replay(url, output_dir="replays"):
     with requests.get(url) as r:
         r.raise_for_status()
         filename = os.path.basename(url)
-        filepath = os.path.join(output_dir, filename)
+        filepath = os.path.join(full_output_path, filename)
         with open(filepath, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
