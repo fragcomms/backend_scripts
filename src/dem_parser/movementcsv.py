@@ -5,7 +5,7 @@ import json
 import os
 import csv
 
-parser = DemoParser("src/replays/parivision-vs-astralis-m1-overpass.dem")
+parser = DemoParser("replays/003802019139782967518_1486376156.dem")
 
 event_names = [
     "begin_new_match", "round_start", "round_end", "round_mvp", 
@@ -101,7 +101,7 @@ replay_json = {
 }
 
 #write player movements to CSV
-csv_filepath = "src/dem_parser/output/player_movements.csv"
+csv_filepath = "output/player_movements.csv"
 csv_ticks = csv_ticks[csv_wanted_props]
 last_tick = last_csv_tick[csv_wanted_props]
 #csv_ticks = csv_ticks + last_tick

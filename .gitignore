@@ -8,6 +8,6 @@ src/dem_parser/output/
 *.dem
 *.log
 *.dem.bz2
-src/dem_parser/steam_demo_downloader/cs2module/*
-!src/dem_parser/steam_demo_downloader/cs2module/cs2client.py
-!src/dem_parser/steam_demo_downloader/cs2module/protobufs.py
+src/steam_demo_downloader/cs2module/*
+!src/steam_demo_downloader/cs2module/cs2client.py
+!src/steam_demo_downloader/cs2module/protobufs.py

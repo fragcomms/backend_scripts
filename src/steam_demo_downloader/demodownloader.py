@@ -26,7 +26,10 @@ bot_pw = os.getenv('BOT_PASSWORD')
 sharecode = os.getenv("AARON_KNOWNCODE")
 
 # Setup logging AFTER getting sharecode otherwise risk of key leak
-logging.basicConfig(filename=f'{int(time.time())}.log',
+script_dir = os.path.dirname(os.path.abspath(__file__))
+log_filename = f'{int(time.time())}.log'
+full_log_path = os.path.join(script_dir, log_filename)
+logging.basicConfig(filename=full_log_path,
                     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
                     level=logging.DEBUG)
 
@@ -94,8 +97,9 @@ def process_match_data(sharecode, message):
     download_replay(message.matches[0].roundstatsall[-1].map)
     
 def download_replay(url, output_dir="replays"):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    full_output_path = os.path.join(script_dir, output_dir)
+    if not os.path.exists(full_output_path):
+        os.makedirs(full_output_path)
         
     logging.info(f"Starting download: {url}")
     
