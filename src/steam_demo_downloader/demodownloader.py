@@ -42,25 +42,23 @@ request_queue = Queue()
 current_job_result = None
 match_links = None
 
-def handle_tcp_client(socket, address):
-    logging.info(f"External connection from {address}")
-    
-    fileobj = socket.makefile(mode='rb')
-    
+def console_input_listener():
+    logging.info("Listening for sharecodes via stdin...")
     while True:
-        # Wait for data
-        line = fileobj.readline()
-        
-        # If line is empty, client disconnected
-        if not line:
+        try:
+            # specifically use select to be non-blocking friendly
+            gevent.select.select([sys.stdin], [], [])
+            line = sys.stdin.readline()
+            if not line:
+                break # EOF (Parent process closed)
+            
+            sharecode = line.strip()
+            if sharecode:
+                logging.info(f"Received via Pipe: {sharecode}")
+                request_queue.put(sharecode)
+        except Exception as e:
+            logging.error(f"Input error: {e}")
             break
-            
-        sharecode = line.strip().decode('utf-8')
-        if sharecode:
-            logging.info(f"Received from external source: {sharecode}")
-            request_queue.put(sharecode)
-            
-    logging.info(f"Connection closed {address}")
 
 # the worker to get through the queue
 def worker_loop():
@@ -167,6 +165,7 @@ def start_csgo():
 def query_sharecode(*args):
     logging.info(f"Welcomed by GC")
     gevent.spawn(worker_loop)
+    gevent.spawn(console_input_listener)
     # if sharecode:
     #     request_queue.put(sharecode)
     #     request_queue.put("CSGO-H4mYW-j8mEB-jwxyH-KBEeK-5b9eD")
@@ -185,8 +184,6 @@ def on_match_list(message):
     current_job_result.set(message)
 
 if __name__ == "__main__":
-    server = StreamServer(('127.0.0.1', 6000), handle_tcp_client)
-    server.start() # Starts in background
-    logging.info("TCP Server listening on 127.0.0.1:6000")
+    logging.info("Steam account service started")
     client.cli_login(username=bot_user, password=bot_pw)
     client.run_forever()

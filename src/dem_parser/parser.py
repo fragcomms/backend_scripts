@@ -82,6 +82,8 @@ def parse_game_events(parser, match_start_tick):
         # keep columns that are wanted and discard rest
         existing_cols = [c for c in wanted_cols if c in df.columns]
         df = df[existing_cols]
+        
+        df = df.astype(object).where(pd.notnull(df), None)
 
         processed_events[event_name] = df.to_dict(orient="records")
 
@@ -90,24 +92,88 @@ def parse_game_events(parser, match_start_tick):
 def get_match_metadata(parser):
     header = parser.parse_header()
     map_name = header.get("map_name", "unknown")
-    try:
-        match_start_df = parser.parse_event("begin_new_match")
-        start_tick = int(match_start_df['tick'].iloc[0]) if not match_start_df.empty else 0
-    except:
-        start_tick = 0
     
-    # Fallback to round_start if begin_new_match is missing
-    if start_tick == 0:
-        try:
-            round_start_df = parser.parse_event("round_start")
-            if not round_start_df.empty:
-                start_tick = int(round_start_df['tick'].iloc[0])
-        except:
-            pass
-
     max_tick_df = parser.parse_ticks(["tick"])
     end_tick = int(max_tick_df['tick'].max())
-    return start_tick, end_tick, map_name
+    
+    start_tick = 0
+    try:
+        match_start_df = parser.parse_event("begin_new_match") # find warmup phase
+        if not match_start_df.empty:
+            start_tick = int(match_start_df['tick'].iloc[0])
+        else:
+            round_start_df = parser.parse_event("round_start") # actual round start
+            if not round_start_df.empty:
+                start_tick = int(round_start_df['tick'].iloc[0])
+    except:
+        pass
+
+    winner_team = 0  # 2 = T, 3 = CT
+    score_t = 0
+    score_ct = 0
+    
+    try:
+        # Get score state at the final tick
+        df_score = parser.parse_ticks(["team_num", "team_rounds_total"], ticks=[end_tick])
+        
+        t_data = df_score[df_score['team_num'] == 2]
+        ct_data = df_score[df_score['team_num'] == 3]
+        
+        if not t_data.empty: score_t = int(t_data.iloc[0]['team_rounds_total'])
+        if not ct_data.empty: score_ct = int(ct_data.iloc[0]['team_rounds_total'])
+            
+        if score_t > score_ct:
+            winner_team = 2
+        elif score_ct > score_t:
+            winner_team = 3
+    except Exception as e:
+        print(f"Warning: Could not fetch final scores: {e}")
+
+    winning_side_str = "Draw" # only at 15:15
+    
+    if winner_team != 0:
+        try:
+            # We grab player teams at START and END
+            # We filter for alive/connected players to ensure we get valid data
+            props = ["player_steamid", "team_num"]
+            
+            # Fetch data for start and end
+            df_players = parser.parse_ticks(props, ticks=[start_tick, end_tick])
+            
+            # Pick a "Reference Player" (The first steamid found at the start)
+            start_data = df_players[df_players['tick'] == start_tick]
+            
+            if not start_data.empty:
+                ref_player = start_data.iloc[0] # Pick the first player found
+                ref_steamid = ref_player['player_steamid']
+                ref_start_team = int(ref_player['team_num']) # 2 or 3
+                
+                # Find that SAME player at the end
+                end_data = df_players[
+                    (df_players['tick'] == end_tick) & 
+                    (df_players['player_steamid'] == ref_steamid)
+                ]
+                
+                if not end_data.empty:
+                    ref_end_team = int(end_data.iloc[0]['team_num'])
+                    
+                    ref_player_won = (ref_end_team == winner_team)
+                    
+                    if ref_player_won:
+                        if ref_start_team == 2:
+                            winning_side_str = "TeamStartedT"
+                        elif ref_start_team == 3:
+                            winning_side_str = "TeamStartedCT"
+                    else: # other team
+                        if ref_start_team == 2:
+                            winning_side_str = "TeamStartedCT" # Started T lost, so Started CT won
+                        elif ref_start_team == 3:
+                            winning_side_str = "TeamStartedT"
+
+        except Exception as e:
+            print(f"Warning: Could not track side switch: {e}")
+
+    return start_tick, end_tick, map_name, winner_team, score_t, score_ct, winning_side_str
 
 def process_ticks(parser, start_tick, end_tick):
     wanted_ticks = np.arange(start_tick, end_tick + 1, TICK_INTERVAL)
@@ -134,7 +200,7 @@ def process_ticks(parser, start_tick, end_tick):
         }
 
     # to make sure we only get alive players during the ticks
-    df = df[df['is_alive'] == True]
+    # df = df[df['is_alive'] == True]
 
     # rounding floats to make sure no crazy value (0.032193120310) happens
     df['X'] = df['X'].astype(float).round(2)
@@ -193,7 +259,7 @@ def save_json(data, filename):
     
     print(f"Saving to {filepath}...")
     with open(filepath, "w") as f:
-        # Use separators to strip whitespace completely (it makes a difference in size)
+        # Use separators to strip whitespace completely
         json.dump(data, f, separators=(',', ':'))
         # json.dump(data, f, indent=1) # use if you need to understand how the structure is
     print("Done.")
@@ -204,17 +270,29 @@ def main():
     base_filename = os.path.basename(demo_path)
     
     parser = DemoParser(demo_path)
-    
-    # 1. FAST: Get Metadata immediately
+
     print("Parsing Metadata...")
-    start_tick, end_tick, map_name = get_match_metadata(parser)
+    start_tick, end_tick, map_name, winner, t_score, ct_score, winning_start_side = get_match_metadata(parser)
+
+    winner_name = "Draw"
+    if winner == 2: winner_name = "T"
+    if winner == 3: winner_name = "CT"
+
+    print(f"Final Score: T {t_score} - {ct_score} CT")
+    print(f"Winner Faction: {winner_name}")
+    print(f"Actual Team Winner: {winning_start_side}") # e.g. "TeamStartedCT"
 
     meta_payload = {
         "filename": base_filename,
         "map": map_name,
         "interval": TICK_INTERVAL,
-        "start": start_tick,
-        "end": end_tick
+        "length_ticks": end_tick - start_tick,
+        "winner_team": winner,
+        "winner_name": winner_name,
+        "won_by_team_that_started_as": winning_start_side,
+        "score_t": t_score,
+        "score_ct": ct_score,
+        "final_score": f"{t_score}:{ct_score}"
     }
 
     print("Writing metadata file...")
@@ -224,7 +302,6 @@ def main():
     ticks_data, player_lookup = process_ticks(parser, start_tick, end_tick)
     events_data = parse_game_events(parser, start_tick)
 
-    # 4. FINAL WRITE: Combine everything into the final JSON
     replay_json = {
         "meta": meta_payload,
         "players": player_lookup,
