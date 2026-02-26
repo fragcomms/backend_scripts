@@ -2,6 +2,7 @@ from demoparser2 import DemoParser
 import json
 import os
 import sys
+import datetime
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -268,15 +269,31 @@ def save_json(data, filename):
 def main():
     demo_path = get_demo_path()
     base_filename = os.path.basename(demo_path)
-    
     parser = DemoParser(demo_path)
 
     print("Parsing Metadata...")
     start_tick, end_tick, map_name, winner, t_score, ct_score, winning_start_side = get_match_metadata(parser)
 
-    winner_name = "Draw"
-    if winner == 2: winner_name = "T"
-    if winner == 3: winner_name = "CT"
+    winner_name = "D"
+    if winner == 2: winner_name = "2" # T
+    if winner == 3: winner_name = "3" # CT
+    
+    duration = (end_tick - start_tick) 
+    
+    event = {
+        "type": "parse_complete",
+        "payload": {
+            "outcome": winner_name,
+            "file_path": f"{base_filename}.json",
+            "length_ticks": duration,
+            #fetch time server already has
+            #match code server already has
+            "map": map_name,
+            "tick_interval": TICK_INTERVAL,
+            "score_t": t_score,
+            "score_ct": ct_score
+        }
+    }
 
     print(f"Final Score: T {t_score} - {ct_score} CT")
     print(f"Winner Faction: {winner_name}")
@@ -286,7 +303,7 @@ def main():
         "filename": base_filename,
         "map": map_name,
         "interval": TICK_INTERVAL,
-        "length_ticks": end_tick - start_tick,
+        "length_ticks": duration,
         "winner_team": winner,
         "winner_name": winner_name,
         "won_by_team_that_started_as": winning_start_side,
@@ -295,8 +312,8 @@ def main():
         "final_score": f"{t_score}:{ct_score}"
     }
 
-    print("Writing metadata file...")
-    save_json({"meta": meta_payload}, f"{base_filename}_meta.json")
+    # print("Writing metadata file...")
+    # save_json({"meta": meta_payload}, f"{base_filename}_meta.json")
 
     print("Processing Ticks & Events (this may take a while)...")
     ticks_data, player_lookup = process_ticks(parser, start_tick, end_tick)
@@ -316,6 +333,7 @@ def main():
     # meta_path = os.path.join(OUTPUT_FOLDER, f"{base_filename}_meta.json")
     # if os.path.exists(meta_path):
     #     os.remove(meta_path)
+    print(f"DATA_OUTPUT:{json.dumps(event)}", flush=True)
 
     # Cleanup demo file
     os.remove(demo_path)
