@@ -1,4 +1,4 @@
-import logging, time, os, gevent, sys, requests, bz2
+import logging, time, os, gevent, sys, requests, bz2, json
 from gevent.queue import Queue
 from gevent.event import AsyncResult
 from gevent.server import StreamServer
@@ -29,11 +29,7 @@ ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://127.0.0.1:8000")
 
 # Setup logging AFTER getting sharecode otherwise risk of key leak
 script_dir = os.path.dirname(os.path.abspath(__file__))
-log_filename = f'{int(time.time())}.log'
-full_log_path = os.path.join(script_dir, log_filename)
-logging.basicConfig(filename=full_log_path,
-                    format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 client = SteamClient()
 cs2 = CS2Client(client)
@@ -91,12 +87,15 @@ def process_match_data(sharecode, message):
         logging.warning(f"No match found for {sharecode}")
         return
     # logging.info(message)
-    logging.info(f"Processed: [{sharecode}]")
-    logging.info(f"Download Link: {message.matches[0].roundstatsall[-1].map}")
-    logging.info(f"Time: {datetime.fromtimestamp(message.matches[0].matchtime).strftime('%Y-%m-%d %H:%M:%S')}")
-    download_replay(message.matches[0].roundstatsall[-1].map)
+    match_url = message.matches[0].roundstatsall[-1].map
+    match_time_iso = datetime.fromtimestamp(message.matches[0].matchtime).isoformat()
     
-def download_replay(url, output_dir=DEMO_OUTPUT_DIR):
+    logging.info(f"Processed: [{sharecode}]")
+    # logging.info(f"Download Link: {match_url}")
+    logging.info(f"Time: {match_time_iso}")
+    download_replay(match_url, sharecode, match_time_iso)
+    
+def download_replay(url, sharecode, match_time_iso, output_dir=DEMO_OUTPUT_DIR):
     if os.path.isabs(output_dir):
         full_output_path = output_dir
     else:
@@ -129,30 +128,35 @@ def download_replay(url, output_dir=DEMO_OUTPUT_DIR):
         
         logging.info("Decompression successful.")
         os.remove(bz2_filepath) 
-        trigger_parser(final_filepath)
+        event = {
+            "type": "download_complete",
+            "payload": {
+                "match_code": sharecode,
+                "fetch_time": match_time_iso,
+                "demo_path": os.path.abspath(final_filepath)
+            }
+        }
+        # trigger_parser(final_filepath, sharecode, match_time_iso)
+        print(f"DATA_OUTPUT:{json.dumps(event)}", flush=True)
         
     except Exception as e:
         logging.error(f"Failed to decompress {bz2_filepath}: {e}")
 
-def trigger_parser(demo_path):
-    """Sends a request to server.py to start parsing this file."""
-    url = f"{ORCHESTRATOR_URL}/parse"
+# def trigger_parser(demo_path, sharecode, match_time_iso):
+#     """Sends a request to server.py to start parsing this file."""
+#     url = f"{ORCHESTRATOR_URL}/parse"
     
-    # We must use absolute path because server.py might be running from a different folder
-    payload = {"demo_path": os.path.abspath(demo_path)}
+#     # We must use absolute path because server.py might be running from a different folder
+#     payload = {"demo_path": os.path.abspath(demo_path),
+#                "match_code": sharecode,
+#                "fetch_time": match_time_iso}
     
-    try:
-        logging.info(f"Triggering parser for: {demo_path}")
-        # We use a short timeout so the downloader doesn't hang if the server is busy
-        resp = requests.post(url, json=payload, timeout=5)
-        
-        if resp.status_code == 200:
-            logging.info("Parser triggered successfully.")
-        else:
-            logging.error(f"Failed to trigger parser. Status: {resp.status_code} - {resp.text}")
-            
-    except Exception as e:
-        logging.error(f"Could not connect to orchestrator at {url}: {e}")
+#     try:
+#         logging.info(f"Triggering parser for: {demo_path}")
+#         # We use a short timeout so the downloader doesn't hang if the server is busy
+#         requests.post(url, json=payload, timeout=5)
+#     except Exception as e:
+#         logging.error(f"Could not connect to orchestrator at {url}: {e}")
 
 @client.on('logged_on') # for steam client
 def start_csgo():
