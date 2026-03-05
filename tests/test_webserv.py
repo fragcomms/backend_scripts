@@ -2,11 +2,10 @@ from fastapi.testclient import TestClient
 import sys
 import os
 import time
-from server import app
 
 src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 sys.path.insert(0, src_path)
-# pylint: disable=import-error, wrong-import-position
+from server import app  # noqa: E402
 
 
 def gitaction_awareness():
