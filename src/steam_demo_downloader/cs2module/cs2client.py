@@ -1,7 +1,7 @@
 from steam.client.gc import GameCoordinator
 from . import cstrike15_gcmessages_pb2 as cstrike_protos
 from . import gcsdk_gcmessages_pb2 as gcsdk_protos
-import logging, gevent
+import logging
 from steam.core.msg import GCMsgHdrProto
 
 

@@ -2,7 +2,6 @@ from demoparser2 import DemoParser
 import json
 import os
 import sys
-import datetime
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -115,7 +114,7 @@ def get_match_metadata(parser):
       round_start_df = parser.parse_event("round_start")  # actual round start
       if not round_start_df.empty:
         start_tick = int(round_start_df["tick"].iloc[0])
-  except:
+  except Exception:
     pass
 
   winner_team = 0  # 2 = T, 3 = CT

@@ -51,7 +51,7 @@ def get_track_title(file_path, track_index):
       "csv=p=0",
       file_path,
     ]
-    output = subprocess.check_output(cmd, text=True).strip()
+    subprocess.check_output(cmd, text=True).strip()
     # Basic sanitization to ensure valid filename (alphanumeric + underscores/dashes)
     # Discord IDs are just numbers, but this is safe fallback
     return None
@@ -145,7 +145,7 @@ def process_audio(audio_path, prompt=None):
       del model_a
 
       # Save Result
-      base_name = os.path.splitext(audio_file)[0]
+      # base_name = os.path.splitext(audio_file)[0]
       output_file = f"{track_identifier}.txt"
 
       print(f"--- Writing to {os.path.basename(output_file)} ---")

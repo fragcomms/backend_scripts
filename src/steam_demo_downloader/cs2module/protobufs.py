@@ -73,7 +73,7 @@ def prepare_file(src_path: Path, dest_path: Path):
     # Remove existing package
     content = re.sub(r"^package\s+[\w\.]+;", "", content, flags=re.MULTILINE)
     # Inject custom package
-    new_content = f"package valve_pbuf;\n" + content
+    new_content = "package valve_pbuf;\n" + content
     # Strip leading dots from types to fix internal references
     new_content = re.sub(r"([ \(\)=])\.([A-Z])", r"\1\2", new_content)
     dest_path.write_text(new_content, encoding="utf-8")

@@ -1,7 +1,12 @@
-import logging, time, os, gevent, sys, requests, bz2, json
+import logging
+import os
+import gevent
+import sys
+import requests
+import bz2
+import json
 from gevent.queue import Queue
 from gevent.event import AsyncResult
-from gevent.server import StreamServer
 from dotenv import load_dotenv
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = (
@@ -178,7 +183,7 @@ def start_csgo():
 
 @cs2.on(4004)  # welcomed
 def query_sharecode(*args):
-  logging.info(f"Welcomed by GC")
+  logging.info("Welcomed by GC")
   gevent.spawn(worker_loop)
   gevent.spawn(console_input_listener)
   # if sharecode:

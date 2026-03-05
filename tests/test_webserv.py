@@ -1,13 +1,12 @@
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, patch
 import sys
 import os
 import time
+from server import app
 
 src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 sys.path.insert(0, src_path)
 # pylint: disable=import-error, wrong-import-position
-from server import app
 
 
 def gitaction_awareness():
