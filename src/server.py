@@ -1,7 +1,7 @@
 # import datetime as dt
 from datetime import datetime # ????????????
-import os, subprocess, socket, time, sys, logging, threading, json
-import asyncpg, asyncio
+import os, subprocess, time, sys, logging, json
+import asyncio, asyncpg
 from typing import Optional, Dict
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from contextlib import asynccontextmanager
@@ -26,7 +26,9 @@ DB_CONFIG = {
     "database": os.getenv("PG_DB")
 }
 
-TASK_CONTEXT: Dict[str, dict] = {} # decided storing fragmented data from downloader here so that way there can only be one query for each parsed demo
+TASK_CONTEXT: Dict[str, dict] = {} 
+# decided storing fragmented data from downloader here
+# so that way there can only be one query for each parsed demo
 downloader_process: Optional[subprocess.Popen] = None
 
 db_pool: Optional[asyncpg.Pool] = None
@@ -213,7 +215,6 @@ async def launch_subprocess(cmd: list, task_name: str):
 
 #HELPER FUNCTION FOR DOWNLOADER
 async def send_via_pipe(sharecode: str):
-    global downloader_process
     if downloader_process and downloader_process.returncode is None:
         try:
             downloader_process.stdin.write(f"{sharecode}\n".encode())
@@ -288,6 +289,7 @@ async def lifespan(app: FastAPI):
 class DownloadRequest(BaseModel):
     sharecode: str
 
+
 class ParseRequest(BaseModel):
     demo_path: str
     match_code: str
@@ -331,6 +333,10 @@ async def trigger_transcribe(req: TranscriptRequest, background_tasks: Backgroun
     if req.prompt: cmd.append(req.prompt)
     await launch_subprocess(cmd, "Transcriber")
     return {"status": "processing", "file": req.file_path}
+  
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
