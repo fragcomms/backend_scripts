@@ -1,15 +1,27 @@
-import argparse
 import whisperx
 import gc
 import torch
 import os
 import subprocess
+import json
+import sys
 
 # config - TODO: identify if theres anything else required or "nice to haves" for configuration
 DEVICE = "cuda"
 BATCH_SIZE = 4
 COMPUTE_TYPE = "float16"
 MODEL_TYPE = "large-v3"
+OUTPUT_DIR = None
+
+
+def get_output_dir(dir):
+  if dir:
+    target_dir = os.path.abspath(dir)
+  else:
+    target_dir
+
+  os.makedirs(target_dir, exist_ok=True)
+  return target_dir
 
 
 def get_audio_track_count(file_path):
@@ -32,7 +44,9 @@ def get_audio_track_count(file_path):
       return 0
     return len(output.splitlines())
   except subprocess.CalledProcessError:
-    print("Error: Could not determine audio tracks. Is ffprobe installed?")
+    print(
+      "Error: Could not determine audio tracks. Is ffprobe installed?", file=sys.stderr
+    )
     return
 
 
@@ -51,10 +65,10 @@ def get_track_title(file_path, track_index):
       "csv=p=0",
       file_path,
     ]
-    subprocess.check_output(cmd, text=True).strip()
+    output = subprocess.check_output(cmd, text=True).strip()
     # Basic sanitization to ensure valid filename (alphanumeric + underscores/dashes)
     # Discord IDs are just numbers, but this is safe fallback
-    return None
+    return output if output else None
   except Exception:
     return None
 
@@ -85,10 +99,14 @@ def process_audio(audio_path, prompt=None):
   if not os.path.exists(audio_file):
     raise FileNotFoundError(f"File not found at {audio_file}")
   num_tracks = get_audio_track_count(audio_file)
-  print(f"Processing: {audio_file}")
+  print(f"Processing: {audio_file}", sys.stdout)
 
   if num_tracks == 0:
     return []
+
+  save_dir = get_output_dir(OUTPUT_DIR)
+  base_audio_name = os.path.splitext(os.path.basename(audio_file))[0]
+  print(f"Output directory set to: {save_dir}", sys.stdout)
 
   # set up for transcribing
   asr_options = {"initial_prompt": prompt} if prompt else None
@@ -108,10 +126,14 @@ def process_audio(audio_path, prompt=None):
   for i in range(num_tracks):
     user_id = get_track_title(audio_file, i)
     track_identifier = user_id if user_id else f"track_{i + 1}"
-    print(f"\n=== Processing Track {i + 1}/{num_tracks} (ID: {track_identifier}) ===")
+    print(
+      f"\n=== Processing Track {i + 1}/{num_tracks} (ID: {track_identifier}) ===",
+      sys.stdout,
+    )
 
     # Create temp file for this track
-    temp_wav = os.path.join(os.path.dirname(audio_file), f"temp_{track_identifier}.wav")
+    temp_wav = os.path.join(save_dir, f"temp_{base_audio_name}_{track_identifier}.wav")
+    output_file = os.path.join(save_dir, f"{base_audio_name}_{track_identifier}.txt")
 
     try:
       # Extract specific track
@@ -126,7 +148,7 @@ def process_audio(audio_path, prompt=None):
 
       # Align - inspect the aftermath and readjust shooting angle
       # We load/unload align model per track because language might differ per track (highly unlikely)
-      print(f"--- Aligning Track {i + 1} ({result['language']}) ---")
+      print(f"--- Aligning Track {i + 1} ({result['language']}) ---", sys.stdout)
       model_a, metadata = whisperx.load_align_model(
         language_code=result["language"], device=DEVICE
       )
@@ -146,9 +168,9 @@ def process_audio(audio_path, prompt=None):
 
       # Save Result
       # base_name = os.path.splitext(audio_file)[0]
-      output_file = f"{track_identifier}.txt"
+      # output_file = f"{track_identifier}.txt"
 
-      print(f"--- Writing to {os.path.basename(output_file)} ---")
+      print(f"--- Writing to {os.path.basename(output_file)} ---", sys.stdout)
       with open(output_file, "w", encoding="utf-8") as f:
         for segment in result["segments"]:
           start = round(segment["start"], 2)
@@ -159,7 +181,7 @@ def process_audio(audio_path, prompt=None):
       output_files.append(output_file)
 
     except Exception as e:
-      print(f"Error processing track {i + 1}: {e}")
+      print(f"Error processing track {i + 1}: {e}", sys.stderr)
     finally:
       # Clean up temp wav
       if os.path.exists(temp_wav):
@@ -174,19 +196,29 @@ def process_audio(audio_path, prompt=None):
 
 # main function used for debugging
 def main():
-  parser = argparse.ArgumentParser(description="Run WhisperX on multi-track audio.")
-  parser.add_argument("audio_path", type=str, help="Absolute path to the audio file")
-  parser.add_argument("prompt", type=str, nargs="?", default=None)
-  # ex: python3 main.py /ex/am/ple
-  args = parser.parse_args()
+  if len(sys.argv) < 2:
+    print("Usage: python transcriber.py <audio_path> [prompt]", sys.stderr)
+    sys.exit(1)
+
+  audio_path = os.path.abspath(sys.argv[1])
+  prompt = sys.argv[2] if len(sys.argv) > 2 else None
 
   try:
-    files = process_audio(args.audio_path, args.prompt)
+    files = process_audio(audio_path, prompt)
     print("\n---Completed---")
-    for f in files:
-      print(f)
+    for filepath in files:
+      event = {
+        "type": "transcribe_complete",
+        "payload": {
+          "filepath": filepath,
+          "model_id": "1",
+          "original_audio": audio_path,
+        },
+      }
+      print(f"DATA_OUTPUT:{json.dumps(event)}", flush=True)
   except Exception as e:
-    print(f"Error: {e}")
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
 
 
 if __name__ == "__main__":
