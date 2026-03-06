@@ -34,7 +34,7 @@ bot_user = os.getenv("BOT_USERNAME")
 bot_pw = os.getenv("BOT_PASSWORD")
 # sharecode = os.getenv("AARON_KNOWNCODE")
 DEMO_OUTPUT_DIR = os.getenv("DEMO_OUTPUT_DIR", "replays")
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://127.0.0.1:8000")
+# ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://127.0.0.1:8000")
 
 # Setup logging AFTER getting sharecode otherwise risk of key leak
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,7 +101,6 @@ def process_match_data(sharecode, message):
   # logging.info(message)
   match_url = message.matches[0].roundstatsall[-1].map
   match_time_iso = datetime.fromtimestamp(message.matches[0].matchtime).isoformat()
-
   logging.info(f"Processed: [{sharecode}]")
   # logging.info(f"Download Link: {match_url}")
   logging.info(f"Time: {match_time_iso}")
