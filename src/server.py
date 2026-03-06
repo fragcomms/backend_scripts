@@ -112,11 +112,11 @@ async def insert_into_db(record: dict, event_type: str):
       async with db_pool.acquire() as conn:
         await conn.execute(
           query,
-          record.get("txt_path"),
+          record.get("filepath"),
           record.get("audio_id"),
           record.get("model_id"),
         )
-      logger.info(f"Successfully linked {os.path.basename(record.get('txt_path'))}")
+      logger.info(f"Successfully linked {os.path.basename(record.get('filepath'))}")
     except Exception as e:
       logger.error(f"Transcript DB Insertion failed: {e}")
 
@@ -173,8 +173,8 @@ async def handle_subprocess_event(event: dict, task_name: str):
       logger.error(f"Lost context for {task_name}! Cannot save to DB.")
       return
 
-    txt_path = payload.get("txt_path")
-    logger.info(f"Transcript ready: {os.path.basename(txt_path)}")
+    filepath = payload.get("filepath")
+    logger.info(f"Transcript ready: {os.path.basename(filepath)}")
     payload["audio_id"] = audio_id
 
     await insert_into_db(payload, event_type)
