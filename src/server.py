@@ -20,7 +20,7 @@ load_dotenv()
 # Configuration
 # Adjust these paths if your folder structure is different
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TRANSCRIPT_SCRIPT = os.path.join(BASE_DIR, "transcripts", "transcriber.py")
+TRANSCRIPT_SCRIPT = os.path.join(BASE_DIR, "transcription", "transcriber.py")
 PARSER_SCRIPT = os.path.join(BASE_DIR, "dem_parser", "parser.py")
 PARSER_OUTPUT_DIR = os.path.join(BASE_DIR, "dem_parser", "output")
 DOWNLOADER_SCRIPT = os.path.join(BASE_DIR, "steam_demo_downloader", "demodownloader.py")

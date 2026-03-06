@@ -18,7 +18,7 @@ def get_output_dir(dir):
   if dir:
     target_dir = os.path.abspath(dir)
   else:
-    target_dir
+    target_dir = os.path.dirname(os.path.abspath(__file__))
 
   os.makedirs(target_dir, exist_ok=True)
   return target_dir
@@ -99,14 +99,14 @@ def process_audio(audio_path, prompt=None):
   if not os.path.exists(audio_file):
     raise FileNotFoundError(f"File not found at {audio_file}")
   num_tracks = get_audio_track_count(audio_file)
-  print(f"Processing: {audio_file}", sys.stdout)
+  print(f"Processing: {audio_file}", file=sys.stdout)
 
   if num_tracks == 0:
     return []
 
   save_dir = get_output_dir(OUTPUT_DIR)
   base_audio_name = os.path.splitext(os.path.basename(audio_file))[0]
-  print(f"Output directory set to: {save_dir}", sys.stdout)
+  print(f"Output directory set to: {save_dir}", file=sys.stdout)
 
   # set up for transcribing
   asr_options = {"initial_prompt": prompt} if prompt else None
@@ -127,8 +127,8 @@ def process_audio(audio_path, prompt=None):
     user_id = get_track_title(audio_file, i)
     track_identifier = user_id if user_id else f"track_{i + 1}"
     print(
-      f"\n=== Processing Track {i + 1}/{num_tracks} (ID: {track_identifier}) ===",
-      sys.stdout,
+      f"Processing Track {i + 1}/{num_tracks} (ID: {track_identifier})",
+      file=sys.stdout,
     )
 
     # Create temp file for this track
@@ -148,7 +148,7 @@ def process_audio(audio_path, prompt=None):
 
       # Align - inspect the aftermath and readjust shooting angle
       # We load/unload align model per track because language might differ per track (highly unlikely)
-      print(f"--- Aligning Track {i + 1} ({result['language']}) ---", sys.stdout)
+      print(f"Aligning Track {i + 1} ({result['language']})", file=sys.stdout)
       model_a, metadata = whisperx.load_align_model(
         language_code=result["language"], device=DEVICE
       )
@@ -170,7 +170,7 @@ def process_audio(audio_path, prompt=None):
       # base_name = os.path.splitext(audio_file)[0]
       # output_file = f"{track_identifier}.txt"
 
-      print(f"--- Writing to {os.path.basename(output_file)} ---", sys.stdout)
+      print(f"Writing to {os.path.basename(output_file)}", file=sys.stdout)
       with open(output_file, "w", encoding="utf-8") as f:
         for segment in result["segments"]:
           start = round(segment["start"], 2)
