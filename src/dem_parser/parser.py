@@ -362,7 +362,7 @@ def main():
   }
 
   # Save the full replay (overwriting or creating a new file)
-  save_json(replay_json, f"{base_filename}.json")
+  save_json(replay_json, absolute_file_path)
 
   # delete meta file
   # meta_path = os.path.join(OUTPUT_FOLDER, f"{base_filename}_meta.json")

@@ -113,7 +113,7 @@ async def insert_into_db(record: dict, event_type: str):
         await conn.execute(
           query,
           record.get("filepath"),
-          record.get("audio_id"),
+          int(record.get("audio_id")),
           int(record.get("model_id")),
         )
       logger.info(f"Successfully linked {os.path.basename(record.get('filepath'))}")
