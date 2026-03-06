@@ -114,7 +114,7 @@ async def insert_into_db(record: dict, event_type: str):
           query,
           record.get("filepath"),
           record.get("audio_id"),
-          record.get("model_id"),
+          int(record.get("model_id")),
         )
       logger.info(f"Successfully linked {os.path.basename(record.get('filepath'))}")
     except Exception as e:
