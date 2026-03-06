@@ -14,11 +14,11 @@ MODEL_TYPE = "large-v3"
 OUTPUT_DIR = None
 
 
-def get_output_dir(dir):
+def get_output_dir(dir, audio_path):
   if dir:
     target_dir = os.path.abspath(dir)
   else:
-    target_dir = os.path.dirname(os.path.abspath(__file__))
+    target_dir = os.path.dirname(os.path.abspath(audio_path))
 
   os.makedirs(target_dir, exist_ok=True)
   return target_dir
@@ -104,7 +104,7 @@ def process_audio(audio_path, prompt=None):
   if num_tracks == 0:
     return []
 
-  save_dir = get_output_dir(OUTPUT_DIR)
+  save_dir = get_output_dir(OUTPUT_DIR, audio_file)
   base_audio_name = os.path.splitext(os.path.basename(audio_file))[0]
   print(f"Output directory set to: {save_dir}", file=sys.stdout)
 
