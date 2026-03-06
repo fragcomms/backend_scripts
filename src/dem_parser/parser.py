@@ -23,6 +23,27 @@ def get_demo_path():
   return demo_path
 
 
+def get_absolute_path(filename):
+  if os.path.isabs(OUTPUT_FOLDER):
+    output_dir = OUTPUT_FOLDER
+  else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, OUTPUT_FOLDER)
+  return os.path.join(output_dir, filename)
+
+
+def save_json(data, filepath):
+  os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+  print(f"Saving to {filepath}...")
+  with open(filepath, "w") as f:
+    # Use separators to strip whitespace completely
+    json.dump(data, f, separators=(",", ":"))
+    # json.dump(data, f, indent=1) # use if you need to understand how the structure is
+  print("Done.")
+  return filepath
+
+
 def parse_game_events(parser, match_start_tick):
   event_names = [
     "weapon_fire",
@@ -253,7 +274,7 @@ def process_ticks(parser, start_tick, end_tick):
 
   # keep ONLY these columns + tick
   # we drop name, team, is_alive, and any other misc
-  keep_cols = ["tick", "sid", "hp", "x", "y", "p", "rot"]
+  keep_cols = ["tick", "sid", "hp", "x", "y", "z", "p", "rot"]
 
   # Filter to ensure we only have existing columns (avoids errors if a tick is empty)
   existing_cols = [c for c in keep_cols if c in df.columns]
@@ -273,30 +294,10 @@ def process_ticks(parser, start_tick, end_tick):
   return timeline, player_lookup
 
 
-def save_json(data, filename):
-  if os.path.isabs(OUTPUT_FOLDER):
-    output_dir = OUTPUT_FOLDER
-  else:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, OUTPUT_FOLDER)
-
-  if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-  filepath = os.path.join(output_dir, filename)
-
-  print(f"Saving to {filepath}...")
-  with open(filepath, "w") as f:
-    # Use separators to strip whitespace completely
-    json.dump(data, f, separators=(",", ":"))
-    # json.dump(data, f, indent=1) # use if you need to understand how the structure is
-  print("Done.")
-  return filepath
-
-
 def main():
   demo_path = get_demo_path()
   base_filename = os.path.basename(demo_path)
+  absolute_file_path = get_absolute_path(f"{base_filename}.json")
   parser = DemoParser(demo_path)
 
   print("Parsing Metadata...")
@@ -313,10 +314,10 @@ def main():
   duration = end_tick - start_tick
 
   event = {
-    "type": "parse_complete",
+    "type": "parse_meta_complete",
     "payload": {
       "outcome": winner_name,
-      "file_path": f"{base_filename}.json",
+      "file_path": absolute_file_path,
       "length_ticks": duration,
       # fetch time server already has
       # match code server already has
@@ -330,6 +331,8 @@ def main():
   print(f"Final Score: T {t_score} - {ct_score} CT")
   print(f"Winner Faction: {winner_name}")
   print(f"Actual Team Winner: {winning_start_side}")  # e.g. "TeamStartedCT"
+
+  print(f"DATA_OUTPUT:{json.dumps(event)}", flush=True)
 
   meta_payload = {
     "filename": base_filename,
@@ -365,7 +368,6 @@ def main():
   # meta_path = os.path.join(OUTPUT_FOLDER, f"{base_filename}_meta.json")
   # if os.path.exists(meta_path):
   #     os.remove(meta_path)
-  print(f"DATA_OUTPUT:{json.dumps(event)}", flush=True)
 
   # Cleanup demo file
   os.remove(demo_path)
