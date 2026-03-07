@@ -1,4 +1,3 @@
-# import datetime as dt
 from datetime import datetime  # ????????????
 import os
 import subprocess
@@ -9,7 +8,7 @@ import json
 import asyncio
 import asyncpg
 from typing import Optional, Dict
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import uvicorn
@@ -83,6 +82,7 @@ async def insert_into_db(record: dict, event_type: str):
 
     async with db_pool.acquire() as conn:
       demo_id = await conn.fetchval(
+        query,
         record["outcome"],
         record["file_path"],
         record["length_ticks"],
@@ -208,15 +208,17 @@ async def listen_to_process(process, task_name):
     # logger.info(f"[{task_name}] Process finished.")
   finally:
     await process.wait()
-    logger.info(f"[{task_name}] Process finished.")
+    logger.info(f"[{task_name}] Process finished with code {process.returncode}")
 
-    if task_name in TASK_CONTEXT:
+    if process.returncode != 0:
       context = TASK_CONTEXT.pop(task_name, {})
       job_id = context.get("job_id")
 
       if job_id and job_id in TASK_CONTEXT:
         logger.warning(f"Cleaning dead watcher: {job_id} due to {task_name} failure")
         del TASK_CONTEXT[job_id]
+    else:
+      TASK_CONTEXT.pop(task_name, None)
 
 
 async def launch_subprocess(cmd: list, task_name: str):
@@ -364,7 +366,7 @@ async def trigger_download(req: DownloadRequest):
 
 # ONLY USE FOR DEBUG
 @app.post("/parse")
-async def trigger_parse(req: ParseRequest, background_tasks: BackgroundTasks):
+async def trigger_parse(req: ParseRequest):
   """Runs the demo parser on a specific file."""
   if not os.path.exists(req.demo_path):
     raise HTTPException(status_code=404, detail="Demo file not found")
@@ -383,16 +385,8 @@ async def trigger_parse(req: ParseRequest, background_tasks: BackgroundTasks):
 
 
 @app.post("/transcribe")
-async def trigger_transcribe(req: TranscriptRequest, background_tasks: BackgroundTasks):
+async def trigger_transcribe(req: TranscriptRequest):
   """Runs WhisperX on an audio file."""
-  # if not os.path.exists(req.file_path):
-  #   raise HTTPException(status_code=404, detail="Audio file not found")
-
-  # cmd = [sys.executable, TRANSCRIPT_SCRIPT, req.file_path]
-  # if req.prompt:
-  #   cmd.append(req.prompt)
-  # await launch_subprocess(cmd, "Transcriber")
-  # return {"status": "processing", "file": req.file_path}
   if not db_pool:
     raise HTTPException(status_code=500, detail="Database not connected")
 
@@ -423,7 +417,7 @@ async def trigger_transcribe(req: TranscriptRequest, background_tasks: Backgroun
 
 
 @app.post("/create_replay")
-async def create_replay(req: CreateReplayRequest, background_tasks: BackgroundTasks):
+async def create_replay(req: CreateReplayRequest):
   if not db_pool:
     raise HTTPException(status_code=500, detail="Database not connected")
 
