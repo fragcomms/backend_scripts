@@ -155,23 +155,6 @@ def download_replay(url, sharecode, match_time_iso, output_dir=DEMO_OUTPUT_DIR):
     logging.error(f"Failed to decompress {bz2_filepath}: {e}")
 
 
-# def trigger_parser(demo_path, sharecode, match_time_iso):
-#     """Sends a request to server.py to start parsing this file."""
-#     url = f"{ORCHESTRATOR_URL}/parse"
-
-#     # We must use absolute path because server.py might be running from a different folder
-#     payload = {"demo_path": os.path.abspath(demo_path),
-#                "match_code": sharecode,
-#                "fetch_time": match_time_iso}
-
-#     try:
-#         logging.info(f"Triggering parser for: {demo_path}")
-#         # We use a short timeout so the downloader doesn't hang if the server is busy
-#         requests.post(url, json=payload, timeout=5)
-#     except Exception as e:
-#         logging.error(f"Could not connect to orchestrator at {url}: {e}")
-
-
 @client.on("logged_on")  # for steam client
 def start_csgo():
   logging.info("Logged into Steam.")

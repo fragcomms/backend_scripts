@@ -80,8 +80,8 @@ async def insert_into_db(record: dict, event_type: str):
       logger.error(f"Date parsing failed for {raw_time}: {e}")
       return
 
-    async with db_pool.acquire() as conn:
-      demo_id = await conn.fetchval(
+    try:
+      demo_id = await db_pool.fetchval(
         query,
         record["outcome"],
         record["file_path"],
@@ -93,8 +93,11 @@ async def insert_into_db(record: dict, event_type: str):
         record["score_t"],
         record["score_ct"],
       )
-    logger.info(f"Insertion successful: {record['match_code']}")
-    return demo_id
+      logger.info(f"Insertion successful: {record['match_code']}")
+      return demo_id
+    except Exception as e:
+      logger.error(f"Demo DB Insertion failed: {e}")
+
   elif event_type == "transcribe_complete":
     logger.info("Inserting into fragcomms database, audios table")
     query = """
@@ -103,13 +106,12 @@ async def insert_into_db(record: dict, event_type: str):
     ) VALUES ($1, $2, $3)"""
 
     try:
-      async with db_pool.acquire() as conn:
-        await conn.execute(
-          query,
-          record.get("filepath"),
-          int(record.get("audio_id")),
-          int(record.get("model_id")),
-        )
+      await db_pool.execute(
+        query,
+        record.get("filepath"),
+        int(record.get("audio_id")),
+        int(record.get("model_id")),
+      )
       logger.info(f"Successfully linked {os.path.basename(record.get('filepath'))}")
     except Exception as e:
       logger.error(f"Transcript DB Insertion failed: {e}")
@@ -129,10 +131,17 @@ async def handle_subprocess_event(event: dict, task_name: str):
     match_code = payload.get("match_code")
     fetch_time = payload.get("fetch_time")
 
+    job_id = None
+    for key, context in TASK_CONTEXT.items():
+      if context.get("is_watcher") and context.get("match_code") == match_code:
+        job_id = key
+        break
+
     parser_task_name = f"Parser_{match_code[-5:]}"
     TASK_CONTEXT[parser_task_name] = {
       "match_code": match_code,
       "fetch_time": fetch_time,
+      "job_id": job_id,
     }
 
     logger.info(f"Triggering parser for {match_code}")
@@ -161,8 +170,29 @@ async def handle_subprocess_event(event: dict, task_name: str):
     demo_id = await insert_into_db(db_record, event_type)
     job_id = context.get("job_id")
     if job_id and job_id in TASK_CONTEXT:
-      TASK_CONTEXT[job_id]["demo_id"] = demo_id
-      await check_replay_watcher(job_id)
+      watcher = TASK_CONTEXT[job_id]
+      watcher["demo_id"] = demo_id
+
+      map_name = payload.get("map", "unknown_map")
+      base_prompt = watcher.get("base_prompt")
+
+      final_prompt = f"CS2, Counter-Strike, {map_name}"
+      if base_prompt:
+        final_prompt = f"{base_prompt}, {final_prompt}"
+
+      transcriber_task_name = f"Transcriber_{job_id}"
+      TASK_CONTEXT[transcriber_task_name] = {
+        "audio_id": watcher["audio_id"],
+        "job_id": job_id,
+      }
+
+      transcriber_cmd = [sys.executable, TRANSCRIPT_SCRIPT, watcher["audio_file_path"]]
+      transcriber_cmd.append(final_prompt)
+
+      logger.info(
+        f"Parser finished, launching transcriber with map context: {map_name}"
+      )
+      await launch_subprocess(transcriber_cmd, transcriber_task_name)
 
   elif event_type == "transcribe_complete":
     context = TASK_CONTEXT.get(task_name, {})
@@ -254,10 +284,10 @@ async def launch_subprocess(cmd: list, task_name: str):
 
 
 # HELPER FUNCTION FOR DOWNLOADER
-async def send_via_pipe(sharecode: str):
+async def send_via_pipe(match_code: str):
   if downloader_process and downloader_process.returncode is None:
     try:
-      downloader_process.stdin.write(f"{sharecode}\n".encode())
+      downloader_process.stdin.write(f"{match_code}\n".encode())
       await downloader_process.stdin.drain()  # make sure it goes in
     except Exception as e:
       raise HTTPException(status_code=500, detail=f"Failed to pipe to downloader: {e}")
@@ -327,7 +357,7 @@ async def lifespan(app: FastAPI):
 
 
 class DownloadRequest(BaseModel):
-  sharecode: str
+  match_code: str
 
 
 class ParseRequest(BaseModel):
@@ -342,9 +372,7 @@ class TranscriptRequest(BaseModel):
 
 
 class CreateReplayRequest(BaseModel):
-  demo_path: str
   match_code: str
-  fetch_time: str
   audio_id: int
   prompt: Optional[str] = None
   replay_name: str
@@ -355,11 +383,11 @@ app = FastAPI(title="CS2 & Audio Orchestrator", lifespan=lifespan)
 
 @app.post("/download")
 async def trigger_download(req: DownloadRequest):
-  """Sends a sharecode to the background Steam downloader via Pipe."""
-  await send_via_pipe(req.sharecode)
+  """Sends a match_code to the background Steam downloader via Pipe."""
+  await send_via_pipe(req.match_code)
   return {
     "status": "queued",
-    "sharecode": req.sharecode,
+    "match_code": req.match_code,
     "message": "Sent to downloader service",
   }
 
@@ -429,47 +457,28 @@ async def create_replay(req: CreateReplayRequest):
   if not record or not os.path.exists(record["file_path"]):
     raise HTTPException(status_code=404, detail="Audio file not found on disk or DB")
 
-  if not os.path.exists(req.demo_path):
-    raise HTTPException(status_code=404, detail="Demo file not found")
+  # if not os.path.exists(req.demo_path):
+  #   raise HTTPException(status_code=404, detail="Demo file not found")
 
   # define what fields are required for the watcher
   job_id = f"job_{req.match_code[-5:]}_{req.audio_id}"
   TASK_CONTEXT[job_id] = {
     "is_watcher": True,
+    "match_code": req.match_code,
     "replay_name": req.replay_name,
     "audio_id": req.audio_id,
-    "demo_id": None,  # parser will find this
-    "transcript_done": False,  # transcriber will fill this
+    "demo_id": None,
+    "transcript_done": False,
+    "audio_file_path": record["file_path"],
+    "base_prompt": req.prompt,
   }
 
-  # launch the parser
-  parser_task_name = f"Parser_{job_id}"
-  TASK_CONTEXT[parser_task_name] = {
-    "match_code": req.match_code,
-    "fetch_time": req.fetch_time,
-    "job_id": job_id,
-  }
-  parser_cmd = [
-    sys.executable,
-    PARSER_SCRIPT,
-    req.demo_path,
-    req.match_code,
-    req.fetch_time,
-  ]
-  await launch_subprocess(parser_cmd, parser_task_name)
-
-  # launch the transcriber
-  transcriber_task_name = f"Transcriber_{job_id}"
-  TASK_CONTEXT[transcriber_task_name] = {"audio_id": req.audio_id, "job_id": job_id}
-  transcriber_cmd = [sys.executable, TRANSCRIPT_SCRIPT, record["file_path"]]
-  if req.prompt:
-    transcriber_cmd.append(req.prompt)
-  await launch_subprocess(transcriber_cmd, transcriber_task_name)
+  await send_via_pipe(req.match_code)
 
   return {
     "status": "processing",
     "job_id": job_id,
-    "message": "Watcher initialized and tasks launched.",
+    "message": "Pipeline initialized: downloader started",
   }
 
 
