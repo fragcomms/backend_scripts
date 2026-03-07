@@ -22,7 +22,6 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TRANSCRIPT_SCRIPT = os.path.join(BASE_DIR, "transcription", "transcriber.py")
 PARSER_SCRIPT = os.path.join(BASE_DIR, "dem_parser", "parser.py")
-PARSER_OUTPUT_DIR = os.path.join(BASE_DIR, "dem_parser", "output")
 DOWNLOADER_SCRIPT = os.path.join(BASE_DIR, "steam_demo_downloader", "demodownloader.py")
 DB_CONFIG = {
   "host": os.getenv("PG_HOST"),
@@ -38,7 +37,6 @@ TASK_CONTEXT: Dict[str, dict] = {}
 downloader_process: Optional[subprocess.Popen] = None
 
 db_pool: Optional[asyncpg.Pool] = None
-main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 logging.basicConfig(
   level=logging.INFO,
@@ -62,7 +60,8 @@ async def insert_into_db(record: dict, event_type: str):
     INSERT INTO demos (
       outcome, file_path, length_ticks, fetch_time, match_code,
       map, tick_interval, score_t, score_ct
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"""
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING demo_id"""
 
     try:
       raw_time = record.get("fetch_time")
@@ -82,25 +81,20 @@ async def insert_into_db(record: dict, event_type: str):
       logger.error(f"Date parsing failed for {raw_time}: {e}")
       return
 
-    try:
-      fetch_dt = datetime.fromisoformat(record["fetch_time"])
-
-      async with db_pool.acquire() as conn:
-        await conn.execute(
-          query,
-          record["outcome"],
-          record["file_path"],
-          record["length_ticks"],
-          fetch_dt,
-          record["match_code"],
-          record["map"],
-          record["tick_interval"],
-          record["score_t"],
-          record["score_ct"],
-        )
-      logger.info(f"Insertion successful: {record['match_code']}")
-    except Exception as e:
-      logger.error(f"Insertion failed: {e}")
+    async with db_pool.acquire() as conn:
+      demo_id = await conn.fetchval(
+        record["outcome"],
+        record["file_path"],
+        record["length_ticks"],
+        fetch_dt,
+        record["match_code"],
+        record["map"],
+        record["tick_interval"],
+        record["score_t"],
+        record["score_ct"],
+      )
+    logger.info(f"Insertion successful: {record['match_code']}")
+    return demo_id
   elif event_type == "transcribe_complete":
     logger.info("Inserting into fragcomms database, audios table")
     query = """
@@ -163,7 +157,12 @@ async def handle_subprocess_event(event: dict, task_name: str):
       "score_t": payload.get("score_t"),
       "score_ct": payload.get("score_ct"),
     }
-    await insert_into_db(db_record, event_type)
+
+    demo_id = await insert_into_db(db_record, event_type)
+    job_id = context.get("job_id")
+    if job_id and job_id in TASK_CONTEXT:
+      TASK_CONTEXT[job_id]["demo_id"] = demo_id
+      await check_replay_watcher(job_id)
 
   elif event_type == "transcribe_complete":
     context = TASK_CONTEXT.get(task_name, {})
@@ -179,28 +178,45 @@ async def handle_subprocess_event(event: dict, task_name: str):
 
     await insert_into_db(payload, event_type)
 
+    job_id = context.get("job_id")
+    if job_id and job_id in TASK_CONTEXT:
+      TASK_CONTEXT[job_id]["transcript_done"] = True
+      await check_replay_watcher(job_id)
+
 
 async def listen_to_process(process, task_name):
-  while True:
-    line_bytes = await process.stdout.readline()
-    if not line_bytes:
-      break
+  try:
+    while True:
+      line_bytes = await process.stdout.readline()
+      if not line_bytes:
+        break
 
-    line = line_bytes.decode("utf-8").strip()
-    if not line:
-      continue
+      line = line_bytes.decode("utf-8").strip()
+      if not line:
+        continue
 
-    if line.startswith("DATA_OUTPUT:"):
-      try:
-        json_part = line.replace("DATA_OUTPUT:", "", 1)
-        data = json.loads(json_part)
-        await handle_subprocess_event(data, task_name)
-      except Exception as e:
-        logger.error(f"[{task_name}] Event Error: {e}")
-    else:
-      logger.info(f"[{task_name}] {line}")
-  await process.wait()  # clean up zomie processes
-  logger.info(f"[{task_name}] Process finished.")
+      if line.startswith("DATA_OUTPUT:"):
+        try:
+          json_part = line.replace("DATA_OUTPUT:", "", 1)
+          data = json.loads(json_part)
+          await handle_subprocess_event(data, task_name)
+        except Exception as e:
+          logger.error(f"[{task_name}] Event Error: {e}")
+      else:
+        logger.info(f"[{task_name}] {line}")
+    # await process.wait()  # clean up zomie processes
+    # logger.info(f"[{task_name}] Process finished.")
+  finally:
+    await process.wait()
+    logger.info(f"[{task_name}] Process finished.")
+
+    if task_name in TASK_CONTEXT:
+      context = TASK_CONTEXT.pop(task_name, {})
+      job_id = context.get("job_id")
+
+      if job_id and job_id in TASK_CONTEXT:
+        logger.warning(f"Cleaning dead watcher: {job_id} due to {task_name} failure")
+        del TASK_CONTEXT[job_id]
 
 
 async def launch_subprocess(cmd: list, task_name: str):
@@ -234,27 +250,6 @@ async def launch_subprocess(cmd: list, task_name: str):
     logger.error(f"Failed to launch {task_name}: {e}")
     return None
 
-  # threaded method
-  # process = subprocess.Popen(
-  #     cmd,
-  #     cwd=os.path.dirname(cmd[1]) if len(cmd) > 1 else None,
-  #     stdin=subprocess.PIPE,
-  #     stdout=subprocess.PIPE,
-  #     stderr=subprocess.STDOUT,
-  #     text=True,
-  #     bufsize=1
-  # )
-
-  # # Start the listener in a background thread
-  # t = threading.Thread(
-  #     target=listen_to_process,
-  #     args=(process, task_name),
-  #     daemon=True
-  # )
-  # t.start()
-
-  # return process
-
 
 # HELPER FUNCTION FOR DOWNLOADER
 async def send_via_pipe(sharecode: str):
@@ -268,34 +263,32 @@ async def send_via_pipe(sharecode: str):
     raise HTTPException(status_code=503, detail="Downloader service is not running.")
 
 
-# #SUBPROCESS
-# def run_subprocess(command: list, task_name: str):
-#     logger.info(f"Starting {task_name}...")
-#     try:
-#         # force unbuffered output
-#         if command[0] == sys.executable:
-#             command.insert(1, "-u")
+# HELPER FUNCTION FOR TASK_CONTEXT
+async def check_replay_watcher(job_id: str):
+  watcher = TASK_CONTEXT.get(job_id)
+  # remove misc requests
+  if not watcher or not watcher.get("is_watcher"):
+    return
 
-#         with subprocess.Popen(
-#             command,
-#             stdout=subprocess.PIPE,
-#             stderr=subprocess.STDOUT,
-#             text=True,
-#             bufsize=1
-#         ) as proc:
-#             # Read output line by line as it happens
-#             for line in proc.stdout:
-#                 logger.info(f"[{task_name}] {line.strip()}")
+  # we check if the fields are filled
+  if watcher.get("demo_id") is not None and watcher.get("transcript_done") is True:
+    logger.info(f"Watcher complete for {job_id}. Inserting replay")
 
-#             proc.wait() # Wait for finish
+    query = """
+    INSERT INTO replays (demo_id, audio_id, name)
+    VALUES ($1, $2, $3)
+    """
 
-#             if proc.returncode != 0:
-#                 logger.error(f"{task_name} failed with return code {proc.returncode}")
-#             else:
-#                 logger.info(f"{task_name} completed successfully.")
+    try:
+      async with db_pool.acquire() as conn:
+        await conn.execute(
+          query, watcher["demo_id"], watcher["audio_id"], watcher["replay_name"]
+        )
+      logger.info(f"Successfully created replay: {watcher['replay_name']}")
 
-#     except Exception as e:
-#         logger.error(f"Error executing {task_name}: {e}")
+      del TASK_CONTEXT[job_id]
+    except Exception as e:
+      logger.error(f"Replay DB Insertion failed: {e}")
 
 
 # ROUTES
@@ -344,6 +337,15 @@ class ParseRequest(BaseModel):
 class TranscriptRequest(BaseModel):
   audio_id: int
   prompt: Optional[str] = None
+
+
+class CreateReplayRequest(BaseModel):
+  demo_path: str
+  match_code: str
+  fetch_time: str
+  audio_id: int
+  prompt: Optional[str] = None
+  replay_name: str
 
 
 app = FastAPI(title="CS2 & Audio Orchestrator", lifespan=lifespan)
@@ -418,6 +420,63 @@ async def trigger_transcribe(req: TranscriptRequest, background_tasks: Backgroun
   await launch_subprocess(cmd, task_name)
 
   return {"status": "processing", "audio_id": req.audio_id, "file": file_path}
+
+
+@app.post("/create_replay")
+async def create_replay(req: CreateReplayRequest, background_tasks: BackgroundTasks):
+  if not db_pool:
+    raise HTTPException(status_code=500, detail="Database not connected")
+
+  async with db_pool.acquire() as conn:
+    record = await conn.fetchrow(
+      "SELECT file_path FROM audios WHERE audio_id = $1", req.audio_id
+    )
+
+  if not record or not os.path.exists(record["file_path"]):
+    raise HTTPException(status_code=404, detail="Audio file not found on disk or DB")
+
+  if not os.path.exists(req.demo_path):
+    raise HTTPException(status_code=404, detail="Demo file not found")
+
+  # define what fields are required for the watcher
+  job_id = f"job_{req.match_code[-5:]}_{req.audio_id}"
+  TASK_CONTEXT[job_id] = {
+    "is_watcher": True,
+    "replay_name": req.replay_name,
+    "audio_id": req.audio_id,
+    "demo_id": None,  # parser will find this
+    "transcript_done": False,  # transcriber will fill this
+  }
+
+  # launch the parser
+  parser_task_name = f"Parser_{job_id}"
+  TASK_CONTEXT[parser_task_name] = {
+    "match_code": req.match_code,
+    "fetch_time": req.fetch_time,
+    "job_id": job_id,
+  }
+  parser_cmd = [
+    sys.executable,
+    PARSER_SCRIPT,
+    req.demo_path,
+    req.match_code,
+    req.fetch_time,
+  ]
+  await launch_subprocess(parser_cmd, parser_task_name)
+
+  # launch the transcriber
+  transcriber_task_name = f"Transcriber_{job_id}"
+  TASK_CONTEXT[transcriber_task_name] = {"audio_id": req.audio_id, "job_id": job_id}
+  transcriber_cmd = [sys.executable, TRANSCRIPT_SCRIPT, record["file_path"]]
+  if req.prompt:
+    transcriber_cmd.append(req.prompt)
+  await launch_subprocess(transcriber_cmd, transcriber_task_name)
+
+  return {
+    "status": "processing",
+    "job_id": job_id,
+    "message": "Watcher initialized and tasks launched.",
+  }
 
 
 @app.get("/health")
