@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
+from fastapi.responses import FileResponse
 
 load_dotenv()
 
@@ -480,6 +481,32 @@ async def create_replay(req: CreateReplayRequest):
     "job_id": job_id,
     "message": "Pipeline initialized: downloader started",
   }
+
+
+# it needs to have .json prefixed already
+# helper for nodejs backend
+@app.get("/get_json")
+async def get_parsed_json(filepath: str):
+  if not os.path.exists(filepath):
+    raise HTTPException(status_code=404, detail="JSON file not found on remote server")
+  return FileResponse(filepath, media_type="application/json")
+
+
+# helper for nodejs backend
+@app.get("/get_audio")
+async def get_audio(filepath: str):
+  if not os.path.exists(filepath):
+    raise HTTPException(status_code=404, detail="Audio file not found on remote server")
+  return FileResponse(filepath, media_type="audio/x-matroska")
+
+
+@app.get("/get_transcript")
+async def get_transcript(filepath: str):
+  if not os.path.exists(filepath):
+    raise HTTPException(
+      status_code=404, detail="Transcript file not found on remote server"
+    )
+  return FileResponse(filepath, media_type="text/plain")
 
 
 @app.get("/health")
