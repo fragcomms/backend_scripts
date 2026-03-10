@@ -24,7 +24,7 @@ def get_output_dir(dir, audio_path):
   return target_dir
 
 
-def get_audio_track_count(file_path):
+def get_audio_track_count(filepath):
   """Uses ffprobe to count number of audio streams."""
   try:
     cmd = [
@@ -37,7 +37,7 @@ def get_audio_track_count(file_path):
       "stream=index",
       "-of",
       "csv=p=0",
-      file_path,
+      filepath,
     ]
     output = subprocess.check_output(cmd, text=True).strip()
     if not output:
@@ -50,7 +50,7 @@ def get_audio_track_count(file_path):
     return
 
 
-def get_track_title(file_path, track_index):
+def get_track_title(filepath, track_index):
   """Uses ffprobe to extract the 'title' metadata (User ID) from a specific track."""
   try:
     cmd = [
@@ -63,7 +63,7 @@ def get_track_title(file_path, track_index):
       "stream_tags=title",
       "-of",
       "csv=p=0",
-      file_path,
+      filepath,
     ]
     output = subprocess.check_output(cmd, text=True).strip()
     # Basic sanitization to ensure valid filename (alphanumeric + underscores/dashes)
@@ -133,7 +133,7 @@ def process_audio(audio_path, prompt=None):
 
     # Create temp file for this track
     temp_wav = os.path.join(save_dir, f"temp_{base_audio_name}_{track_identifier}.wav")
-    output_file = os.path.join(save_dir, f"{base_audio_name}_{track_identifier}.txt")
+    output_file = os.path.join(save_dir, f"{base_audio_name}_{track_identifier}.json")
 
     try:
       # Extract specific track
@@ -166,17 +166,21 @@ def process_audio(audio_path, prompt=None):
       torch.cuda.empty_cache()
       del model_a
 
-      # Save Result
-      # base_name = os.path.splitext(audio_file)[0]
-      # output_file = f"{track_identifier}.txt"
-
       print(f"Writing to {os.path.basename(output_file)}", file=sys.stdout)
+
+      json_data = {"discord_id": track_identifier, "segments": []}
+
+      for segment in result["segments"]:
+        json_data.append(
+          {
+            "start": round(segment["start"], 2),
+            "end": round(segment["end"], 2),
+            "text": segment["text"].strip(),
+          }
+        )
+
       with open(output_file, "w", encoding="utf-8") as f:
-        for segment in result["segments"]:
-          start = round(segment["start"], 2)
-          end = round(segment["end"], 2)
-          text = segment["text"].strip()
-          f.write(f"[{start:.2f}s - {end:.2f}s]: {text}\n")
+        json.dump(json_data, f, indent=2, ensure_ascii=False)
 
       output_files.append(output_file)
 
@@ -206,11 +210,11 @@ def main():
   try:
     files = process_audio(audio_path, prompt)
     print("\n---Completed---")
-    for filepath in files:
+    for file_info in files:
       event = {
         "type": "transcribe_complete",
         "payload": {
-          "filepath": filepath,
+          "filepath": file_info["filepath"],
           "model_id": "1",
           "original_audio": audio_path,
         },
