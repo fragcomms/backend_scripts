@@ -171,7 +171,7 @@ def process_audio(audio_path, prompt=None):
       json_data = {"discord_id": track_identifier, "segments": []}
 
       for segment in result["segments"]:
-        json_data.append(
+        json_data["segments"].append(
           {
             "start": round(segment["start"], 2),
             "end": round(segment["end"], 2),
