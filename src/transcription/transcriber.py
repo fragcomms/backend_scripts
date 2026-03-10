@@ -210,11 +210,11 @@ def main():
   try:
     files = process_audio(audio_path, prompt)
     print("\n---Completed---")
-    for file_info in files:
+    for filepath in files:
       event = {
         "type": "transcribe_complete",
         "payload": {
-          "filepath": file_info["filepath"],
+          "filepath": filepath,
           "model_id": "1",
           "original_audio": audio_path,
         },
