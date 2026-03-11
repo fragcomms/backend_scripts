@@ -108,10 +108,23 @@ def process_audio(audio_path, prompt=None):
   base_audio_name = os.path.splitext(os.path.basename(audio_file))[0]
   print(f"Output directory set to: {save_dir}", file=sys.stdout)
 
-  # set up for transcribing
-  asr_options = {"initial_prompt": prompt} if prompt else None
+  vocab = "Rush B, CT, T spawn, lit, one tap, eco, drop, awp, mid, rotate, flank, default, plant, defuse, peek, flash, smoke."
 
-  vad_options = {"vad_onset": 0.5, "vad_offset": 0.5}
+  # set up for transcribing
+  asr_options = {
+    "initial_prompt": prompt if prompt else vocab,
+    "condition_on_previous_text": False,
+    "beam_size": 5,
+    "patience": 2.0,
+    "temperatures": [0.0, 0.2, 0.4],
+  }
+
+  vad_options = {
+    "vad_onset": 0.05,
+    "vad_offset": 0.05,
+    "min_duration_on": 0.1,
+    "min_duration_off": 0.2,
+  }
 
   model = whisperx.load_model(
     MODEL_TYPE,
@@ -144,7 +157,9 @@ def process_audio(audio_path, prompt=None):
       audio = whisperx.load_audio(temp_wav)
 
       # Transcribe - shoot the gun
-      result = model.transcribe(audio, batch_size=BATCH_SIZE)
+      # forcing the language to english for now because
+      # the majority of comms are in english
+      result = model.transcribe(audio, batch_size=BATCH_SIZE, language="en")
 
       # Align - inspect the aftermath and readjust shooting angle
       # We load/unload align model per track because language might differ per track (highly unlikely)
