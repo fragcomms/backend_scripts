@@ -122,7 +122,7 @@ def process_audio(audio_path, prompt=None):
   vad_options = {
     "vad_onset": 0.05,
     "vad_offset": 0.05,
-    "min_duration_on": 0.1,
+    "min_duration_on": 0.05,
     "min_duration_off": 0.2,
   }
 
