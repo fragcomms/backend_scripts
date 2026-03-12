@@ -257,8 +257,8 @@ def process_ticks(parser, start_tick, end_tick):
   df["X"] = df["X"].astype(float).round(2)
   df["Y"] = df["Y"].astype(float).round(2)
   df["Z"] = df["Z"].astype(float).round(2)
-  df["pitch"] = df["pitch"].fillna(0).round(0).astype(int)
-  df["yaw"] = df["yaw"].fillna(0).round(0).astype(int)
+  df["pitch"] = df["pitch"].round(0).astype(int)
+  df["yaw"] = df["yaw"].round(0).astype(int)
 
   # rename columns to short keys
   col_map = {
@@ -271,6 +271,8 @@ def process_ticks(parser, start_tick, end_tick):
     "yaw": "rot",  # 'rot' for rotation
   }
   df = df.rename(columns=col_map)
+
+  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
 
   # keep ONLY these columns + tick
   # we drop name, team, is_alive, and any other misc
