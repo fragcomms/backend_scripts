@@ -253,6 +253,8 @@ def process_ticks(parser, start_tick, end_tick):
   # to make sure we only get alive players during the ticks
   # df = df[df['is_alive'] == True]
 
+  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
+
   # rounding floats to make sure no crazy value (0.032193120310) happens
   df["X"] = df["X"].astype(float).round(2)
   df["Y"] = df["Y"].astype(float).round(2)
@@ -271,8 +273,6 @@ def process_ticks(parser, start_tick, end_tick):
     "yaw": "rot",  # 'rot' for rotation
   }
   df = df.rename(columns=col_map)
-
-  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
 
   # keep ONLY these columns + tick
   # we drop name, team, is_alive, and any other misc
