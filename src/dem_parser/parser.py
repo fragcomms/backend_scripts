@@ -253,16 +253,6 @@ def process_ticks(parser, start_tick, end_tick):
   # to make sure we only get alive players during the ticks
   # df = df[df['is_alive'] == True]
 
-  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
-
-  # rounding floats to make sure no crazy value (0.032193120310) happens
-  df["X"] = df["X"].astype(float).round(2)
-  df["Y"] = df["Y"].astype(float).round(2)
-  df["Z"] = df["Z"].astype(float).round(2)
-  df["pitch"] = df["pitch"].round(0).astype(int)
-  df["yaw"] = df["yaw"].round(0).astype(int)
-
-  # rename columns to short keys
   col_map = {
     "player_steamid": "sid",
     "health": "hp",
@@ -273,6 +263,17 @@ def process_ticks(parser, start_tick, end_tick):
     "yaw": "rot",  # 'rot' for rotation
   }
   df = df.rename(columns=col_map)
+
+  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
+
+  # rounding floats to make sure no crazy value (0.032193120310) happens
+  df["x"] = df["x"].astype(float).round(2)
+  df["y"] = df["y"].astype(float).round(2)
+  df["z"] = df["z"].astype(float).round(2)
+  df["p"] = df["p"].round(0).astype(int)
+  df["rot"] = df["rot"].round(0).astype(int)
+
+  # rename columns to short keys
 
   # keep ONLY these columns + tick
   # we drop name, team, is_alive, and any other misc
