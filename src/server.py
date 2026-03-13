@@ -127,6 +127,14 @@ async def handle_subprocess_event(event: dict, task_name: str):
 
   logger.info(f"Event Received: {event_type}")
 
+  # if any scripts error out
+  if event_type == "error":
+    logger.error(f"[{task_name}] reported an error: {payload.get('message')}")
+    context = TASK_CONTEXT.get(task_name, {})
+    abort_job(context.get("job_id"), payload.get("message", "Subprocess error"))
+    TASK_CONTEXT.pop(task_name, None)
+    return
+
   if event_type == "download_complete":
     demo_path = payload.get("demo_path")
     match_code = payload.get("match_code")
@@ -183,6 +191,11 @@ async def handle_subprocess_event(event: dict, task_name: str):
 
     demo_id = await insert_into_db(db_record, event_type)
     job_id = context.get("job_id")
+
+    if not demo_id:
+      abort_job(job_id, "Demo database insertion failed.")
+      return
+
     if job_id and job_id in TASK_CONTEXT:
       watcher = TASK_CONTEXT[job_id]
       watcher["demo_id"] = demo_id
@@ -334,7 +347,15 @@ async def check_replay_watcher(job_id: str):
 
       del TASK_CONTEXT[job_id]
     except Exception as e:
+      abort_job(job_id, f"Final replay DB insertion failed: {e}")
       logger.error(f"Replay DB Insertion failed: {e}")
+
+
+# HELPER FUNCTION TO ABORT JOB IF PARSER/DOWNLOADER/TRANSCRIBER DOESN'T WORK
+def abort_job(job_id: str, reason: str):
+  if job_id and job_id in TASK_CONTEXT:
+    logger.error(f"Aborting job '{job_id}: {reason}")
+    del TASK_CONTEXT[job_id]
 
 
 # ROUTES
