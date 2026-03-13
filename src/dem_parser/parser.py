@@ -51,6 +51,12 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     "round_start",
     "round_end",
     "bomb_planted",
+    # grenades
+    "hegrenade_detonate",
+    "flashbang_detonate",
+    "smokegrenade_detonate",
+    "decoy_detonate",
+    "inferno_startfire",
   ]
   events_df = parser.parse_events(event_names, other=["game_time", "team_num"])
 
@@ -71,31 +77,31 @@ def parse_game_events(parser, match_start_tick, steamid_map):
       df = df[df["tick"] >= match_start_tick]
 
     wanted_cols = ["tick"]  # tick always required
-    rename_map = {}
+    rename_map = {"tick": "t"}
 
     if event_name == "player_death":
-      rename_map = {
+      rename_map.update = {
         "user_steamid": "vic",  # Victim
         "attacker_steamid": "att",  # Attacker
         "assister_steamid": "ass",  # assister, NaN if none
-        "weapon": "weapon",
+        "weapon": "wep",
         "headshot": "hs",
       }
-      wanted_cols += ["vic", "att", "ass", "weapon", "hs"]
+      wanted_cols += ["vic", "att", "ass", "wep", "hs"]
 
     elif event_name == "weapon_fire":
       rename_map = {
-        "user_steamid": "sid",  # shooter
-        "weapon": "weapon",
+        "user_steamid": "id",  # shooter
+        "weapon": "wep",
       }
-      wanted_cols += ["sid", "weapon"]
+      wanted_cols += ["id", "wep"]
 
     elif event_name == "bomb_planted":
       rename_map = {
-        "user_steamid": "sid",  # planter
+        "user_steamid": "id",  # planter
         "site": "site",
       }
-      wanted_cols += ["sid", "site"]
+      wanted_cols += ["id", "site"]
 
     elif event_name == "round_end":
       rename_map = {
@@ -110,11 +116,25 @@ def parse_game_events(parser, match_start_tick, steamid_map):
       }
       wanted_cols += ["time"]
 
+    elif event_name in [
+      "hegrenade_detonate",
+      "flashbang_detonate",
+      "smokegrenade_detonate",
+      "decoy_detonate",
+      "inferno_startfire",
+    ]:
+      rename_map.update({"user_steamid": "id", "x": "x", "y": "y", "z": "z"})
+      wanted_cols += ["id", "x", "y", "z"]
+
     # Apply Rename
     df = df.rename(columns=rename_map)
 
+    for c in ["x", "y", "z"]:
+      if c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+
     # convert steamid to tiny ints
-    for col in ["vic", "att", "ass", "sid"]:
+    for col in ["vic", "att", "ass", "id"]:
       if col in df.columns:
         df[col] = df[col].apply(safe_map_sid)
 
@@ -227,6 +247,7 @@ def get_match_metadata(parser):
 
 
 def process_ticks(parser, start_tick, end_tick):
+  ############### PLAYER PROCESSING
   wanted_ticks = np.arange(start_tick, end_tick + 1, TICK_INTERVAL)
   if wanted_ticks[-1] != end_tick:
     wanted_ticks = np.append(wanted_ticks, end_tick)
@@ -269,6 +290,7 @@ def process_ticks(parser, start_tick, end_tick):
       player_lookup[current_id] = {
         "name": row["player_name"],
         "team": int(row["team_num"]) if pd.notnull(row["team_num"]) else 0,
+        "sid": original_sid,
       }
       current_id += 1
 
@@ -317,6 +339,62 @@ def process_ticks(parser, start_tick, end_tick):
   df = df[~(is_dead & was_dead_prev)]
   df = df.sort_values(by=["tick"])
 
+  ################### GRENADE PROCESSING
+  g_grouped = None
+  try:
+    print("Fetching grenade flight paths")
+    g_df = parser.parse_grenades()
+
+    if not g_df.empty:
+      g_rename = {
+        "X": "x",
+        "Y": "y",
+        "Z": "z",
+        "entity_id": "eid",
+        "thrower_steamid": "sid",
+        "name": "wep",
+      }
+      g_df = g_df.rename(columns=g_rename)
+      g_df = g_df[g_df["tick"].isin(wanted_ticks)]
+
+      if "sid" in g_df.columns:
+        g_df["sid"] = g_df["sid"].apply(
+          lambda x: steamid_map.get(str(x).split(".")[0]) if pd.notnull(x) else None
+        )
+
+      # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly/Incendiary
+      wep_map = {
+        "hegrenade": 1,
+        "smokegrenade": 2,
+        "flashbang": 3,
+        "decoy": 4,
+        "molotov": 5,
+        "incendiarygrenade": 5,
+      }
+      if "wep" in g_df.columns:
+        g_df["wep"] = g_df["wep"].apply(
+          lambda w: next((v for k, v in wep_map.items() if k in str(w).lower()), 0)
+        )
+
+      # Round coordinates
+      for c in ["x", "y"]:
+        if c in g_df.columns:
+          g_df[c] = pd.to_numeric(g_df[c], errors="coerce").round(2)
+
+      # Keep only what we need (dropping Z since radar is 2D)
+      expected_g_subset = ["eid", "sid", "wep", "x", "y"]
+      actual_g_subset = [c for c in expected_g_subset if c in g_df.columns]
+      if actual_g_subset:
+        g_df = g_df.dropna(subset=actual_g_subset)
+
+      g_keep = ["tick", "eid", "sid", "wep", "x", "y"]
+      g_existing = [c for c in g_keep if c in g_df.columns]
+      g_df = g_df[g_existing]
+
+      g_grouped = g_df.groupby("tick")
+  except Exception as e:
+    print(f"Error: Failed to parse grenade paths: {e}")
+
   # convert to timeline list
   timeline = []
   grouped = df.groupby("tick")
@@ -325,8 +403,14 @@ def process_ticks(parser, start_tick, end_tick):
     # Drop 'tick' from the inner records
     group_data = group.drop(columns=["tick"])
     players_data = group_data.values.tolist()
+
+    tick_obj = {"t": int(tick), "p": players_data}
     # tick to t
-    timeline.append({"t": int(tick), "p": players_data})
+    if g_grouped is not None and tick in g_grouped.groups:
+      g_data = g_grouped.get_group(tick).drop(columns=["tick"])
+      tick_obj["g"] = g_data.values.tolist()
+
+    timeline.append(tick_obj)
 
   return timeline, player_lookup, steamid_map
 
