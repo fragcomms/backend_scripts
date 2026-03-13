@@ -44,7 +44,7 @@ def save_json(data, filepath):
   return filepath
 
 
-def parse_game_events(parser, match_start_tick):
+def parse_game_events(parser, match_start_tick, steamid_map):
   event_names = [
     "weapon_fire",
     "player_death",
@@ -53,6 +53,11 @@ def parse_game_events(parser, match_start_tick):
     "bomb_planted",
   ]
   events_df = parser.parse_events(event_names, other=["game_time", "team_num"])
+
+  def safe_map_sid(val):
+    if pd.isna(val):
+      return None
+    return steamid_map.get(str(val).split(".")[0])
 
   processed_events = {}
   for event_name, df in events_df:
@@ -107,6 +112,11 @@ def parse_game_events(parser, match_start_tick):
 
     # Apply Rename
     df = df.rename(columns=rename_map)
+
+    # convert steamid to tiny ints
+    for col in ["vic", "att", "ass", "sid"]:
+      if col in df.columns:
+        df[col] = df[col].apply(safe_map_sid)
 
     # keep columns that are wanted and discard rest
     existing_cols = [c for c in wanted_cols if c in df.columns]
@@ -231,7 +241,7 @@ def process_ticks(parser, start_tick, end_tick):
     "X",
     "Y",
     "Z",
-    "pitch",
+    # "pitch",
     "yaw",
   ]
 
@@ -240,10 +250,9 @@ def process_ticks(parser, start_tick, end_tick):
 
   # Map SteamID -> Name/Team
   # this runs BEFORE we strip columns, so we can capture the names
-  player_info = (
-    df.groupby("player_steamid").first()[["player_name", "team_num"]].reset_index()
-  )
   player_lookup = {}
+  steamid_map = {}
+
   if (
     "player_steamid" in df.columns
     and "player_name" in df.columns
@@ -252,14 +261,16 @@ def process_ticks(parser, start_tick, end_tick):
     player_info = (
       df.groupby("player_steamid").first()[["player_name", "team_num"]].reset_index()
     )
+    current_id = 0
     for _, row in player_info.iterrows():
-      player_lookup[str(row["player_steamid"])] = {
+      original_sid = str(row["player_steamid"].split("."))[0]
+
+      steamid_map[original_sid] = current_id
+      player_lookup[current_id] = {
         "name": row["player_name"],
         "team": int(row["team_num"]) if pd.notnull(row["team_num"]) else 0,
       }
-
-  # to make sure we only get alive players during the ticks
-  # df = df[df['is_alive'] == True]
+      current_id += 1
 
   col_map = {
     "player_steamid": "sid",
@@ -267,14 +278,21 @@ def process_ticks(parser, start_tick, end_tick):
     "X": "x",
     "Y": "y",
     "Z": "z",
-    "pitch": "p",
+    # "pitch": "p",
     "yaw": "rot",  # 'rot' for rotation
   }
   df = df.rename(columns=col_map)
 
-  df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
+  # map steamids to tiny ints
+  df["sid"] = df["sid"].apply(
+    lambda x: steamid_map.get(str(x).split(".")[0]) if pd.notnull(x) else None
+  )
+
+  # df = df.dropna(subset=["x", "y", "z", "p", "rot", "hp"])
+  df = df.dropna(subset=["x", "y", "z", "rot", "hp"])
 
   # rounding floats to make sure no crazy value (0.032193120310) happens
+  df["sid"] = df["sid"].astype(int)
   df["x"] = df["x"].astype(float).round(2)
   df["y"] = df["y"].astype(float).round(2)
   df["z"] = df["z"].astype(float).round(2)
@@ -292,7 +310,7 @@ def process_ticks(parser, start_tick, end_tick):
   existing_cols = [c for c in keep_cols if c in df.columns]
   df = df[existing_cols]
 
-  # dead player comparison
+  # dead player compact
   df = df.sort_values(by=["sid", "tick"])
   is_dead = df["hp"] <= 0
   was_dead_prev = is_dead.groupby(df["sid"]).shift(1, fill_value=False)
@@ -310,7 +328,7 @@ def process_ticks(parser, start_tick, end_tick):
     # tick to t
     timeline.append({"t": int(tick), "p": players_data})
 
-  return timeline, player_lookup
+  return timeline, player_lookup, steamid_map
 
 
 def main():
@@ -370,8 +388,8 @@ def main():
   # save_json({"meta": meta_payload}, f"{base_filename}_meta.json")
 
   print("Processing Ticks & Events (this may take a while)...")
-  ticks_data, player_lookup = process_ticks(parser, start_tick, end_tick)
-  events_data = parse_game_events(parser, start_tick)
+  ticks_data, player_lookup, steamid_map = process_ticks(parser, start_tick, end_tick)
+  events_data = parse_game_events(parser, start_tick, steamid_map)
 
   replay_json = {
     "meta": meta_payload,
