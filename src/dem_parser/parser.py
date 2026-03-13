@@ -141,13 +141,13 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     df = df[existing_cols]
 
     for col in df.columns:
-      if col in ["t", "vic", "att", "ass", "id", "winner", "reason", "site", "time"]:
+      if col in ["t", "vic", "att", "ass", "id"]:
         df[col] = df[col].fillna(-1).astype(int)
       elif col in ["x", "y", "z"]:
         df[col] = df[col].astype(float).round(2)
       elif col == "hs":
         df[col] = df[col].fillna(False).astype(bool)
-      elif col == "wep":
+      elif col in ["wep", "winner", "reason", "site"]:
         df[col] = df[col].fillna("").astype(str)
 
     processed_events[event_name] = df.to_dict(orient="records")
