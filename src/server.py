@@ -131,9 +131,13 @@ async def handle_subprocess_event(event: dict, task_name: str):
     demo_path = payload.get("demo_path")
     match_code = payload.get("match_code")
     fetch_time = payload.get("fetch_time")
-    
+
     for key, context in list(TASK_CONTEXT.items()):
-      if context.get("is_debug") and context.get("match_code") == match_code and key.startswith("Debug_Download"):
+      if (
+        context.get("is_debug")
+        and context.get("match_code") == match_code
+        and key.startswith("Debug_Download")
+      ):
         del TASK_CONTEXT[key]
         return
 
@@ -160,7 +164,7 @@ async def handle_subprocess_event(event: dict, task_name: str):
     if not context:
       logger.error(f"Lost context for task {task_name}! Cannot save to DB.")
       return
-    
+
     if context.get("is_debug"):
       logger.info(f"[DEBUG] Parse complete for {payload.get('match_code', 'unknown')}")
       return
@@ -390,15 +394,13 @@ class CreateReplayRequest(BaseModel):
 
 app = FastAPI(title="CS2 & Audio Orchestrator", lifespan=lifespan)
 
+
 # ONLY USE FOR DEBUG
 @app.post("/download")
 async def trigger_download(req: DownloadRequest):
   """Sends a match_code to the background Steam downloader via Pipe."""
   task_name = f"Debug_Download_${req.match_code[-5:]}"
-  TASK_CONTEXT[task_name] = {
-    "match_code": req.match_code,
-    "is_debug": True
-  }
+  TASK_CONTEXT[task_name] = {"match_code": req.match_code, "is_debug": True}
   await send_via_pipe(req.match_code)
   return {
     "status": "queued",
@@ -418,7 +420,7 @@ async def trigger_parse(req: ParseRequest):
   TASK_CONTEXT[task_name] = {
     "match_code": req.match_code,
     "fetch_time": req.fetch_time,
-    "is_debug": True
+    "is_debug": True,
   }
 
   # Run in background so API doesn't hang
