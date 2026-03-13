@@ -92,30 +92,38 @@ def parse_game_events(parser, match_start_tick, steamid_map):
       wanted_cols += ["vic", "att", "ass", "wep", "hs"]
 
     elif event_name == "weapon_fire":
-      rename_map = {
-        "user_steamid": "id",  # shooter
-        "weapon": "wep",
-      }
+      rename_map(
+        {
+          "user_steamid": "id",  # shooter
+          "weapon": "wep",
+        }
+      )
       wanted_cols += ["id", "wep"]
 
     elif event_name == "bomb_planted":
-      rename_map = {
-        "user_steamid": "id",  # planter
-        "site": "site",
-      }
+      rename_map(
+        {
+          "user_steamid": "id",  # planter
+          "site": "site",
+        }
+      )
       wanted_cols += ["id", "site"]
 
     elif event_name == "round_end":
-      rename_map = {
-        "winner": "winner",  # which side won the round
-        "reason": "reason",
-      }
+      rename_map(
+        {
+          "winner": "winner",  # which side won the round
+          "reason": "reason",
+        }
+      )
       wanted_cols += ["winner", "reason"]
 
     elif event_name == "round_start":
-      rename_map = {
-        "timelimit": "time",
-      }
+      rename_map(
+        {
+          "timelimit": "time",
+        }
+      )
       wanted_cols += ["time"]
 
     elif event_name in [
@@ -147,7 +155,7 @@ def parse_game_events(parser, match_start_tick, steamid_map):
         df[col] = df[col].astype(float).round(2)
       elif col == "hs":
         df[col] = df[col].fillna(False).astype(bool)
-      elif col in ["wep", "winner", "reason", "site"]:
+      elif col in ["wep", "winner", "reason", "site", "time"]:
         df[col] = df[col].fillna("").astype(str)
 
     processed_events[event_name] = df.to_dict(orient="records")
