@@ -76,7 +76,7 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     else:
       df = df[df["tick"] >= match_start_tick]
 
-    wanted_cols = ["tick"]  # tick always required
+    wanted_cols = ["t"]  # tick always required
     rename_map = {"tick": "t"}
 
     if event_name == "player_death":
@@ -84,7 +84,7 @@ def parse_game_events(parser, match_start_tick, steamid_map):
         {
           "user_steamid": "vic",  # Victim
           "attacker_steamid": "att",  # Attacker
-          "assister_steamid": "ass",  # assister, NaN if none
+          "assister_steamid": "ass",  # assister, null if none
           "weapon": "wep",
           "headshot": "hs",
         }
@@ -131,10 +131,6 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     # Apply Rename
     df = df.rename(columns=rename_map)
 
-    for c in ["x", "y", "z"]:
-      if c in df.columns:
-        df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
-
     # convert steamid to tiny ints
     for col in ["vic", "att", "ass", "id"]:
       if col in df.columns:
@@ -144,7 +140,15 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     existing_cols = [c for c in wanted_cols if c in df.columns]
     df = df[existing_cols]
 
-    df = df.astype(object).where(pd.notnull(df), None)
+    for col in df.columns:
+      if col in ["t", "vic", "att", "ass", "id", "winner", "reason", "site", "time"]:
+        df[col] = df[col].fillna(-1).astype(int)
+      elif col in ["x", "y", "z"]:
+        df[col] = df[col].astype(float).round(2)
+      elif col == "hs":
+        df[col] = df[col].fillna(False).astype(bool)
+      elif col == "wep":
+        df[col] = df[col].fillna("").astype(str)
 
     processed_events[event_name] = df.to_dict(orient="records")
 
@@ -317,11 +321,12 @@ def process_ticks(parser, start_tick, end_tick):
 
   # rounding floats to make sure no crazy value (0.032193120310) happens
   df["sid"] = df["sid"].astype(int)
+  df["hp"] = df["hp"].astype(int)
   df["x"] = df["x"].astype(float).round(2)
   df["y"] = df["y"].astype(float).round(2)
   df["z"] = df["z"].astype(float).round(2)
   # df["p"] = df["p"].round(0).astype(int)
-  df["rot"] = df["rot"].round(0).astype(int)
+  df["rot"] = df["rot"].astype(int)
 
   # rename columns to short keys
 
@@ -361,8 +366,10 @@ def process_ticks(parser, start_tick, end_tick):
 
       if "sid" in g_df.columns:
         g_df["sid"] = g_df["sid"].apply(
-          lambda x: steamid_map.get(str(x).split(".")[0]) if pd.notnull(x) else None
+          lambda x: steamid_map.get(str(x).split(".")[0]) if pd.notnull(x) else -1
         )
+      else:
+        g_df["sid"] = -1
 
       # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly/Incendiary
       wep_map = {
@@ -371,46 +378,65 @@ def process_ticks(parser, start_tick, end_tick):
         "flashbang": 3,
         "decoy": 4,
         "molotov": 5,
-        "incendiarygrenade": 5,
+        "incendiarygrenade": 6,
       }
       if "wep" in g_df.columns:
         g_df["wep"] = g_df["wep"].apply(
           lambda w: next((v for k, v in wep_map.items() if k in str(w).lower()), 0)
         )
+      else:
+        g_df["wep"] = 0
 
-      # Round coordinates
-      for c in ["x", "y"]:
-        if c in g_df.columns:
-          g_df[c] = pd.to_numeric(g_df[c], errors="coerce").round(2)
+      if "eid" not in g_df.columns:
+        g_df["eid"] = 0
+      if "x" not in g_df.columns:
+        g_df["x"] = 0.0
+      if "y" not in g_df.columns:
+        g_df["y"] = 0.0
 
-      # Keep only what we need (dropping Z since radar is 2D)
-      expected_g_subset = ["eid", "sid", "wep", "x", "y"]
-      actual_g_subset = [c for c in expected_g_subset if c in g_df.columns]
-      if actual_g_subset:
-        g_df = g_df.dropna(subset=actual_g_subset)
+      # actually round coordinates
+      g_df["eid"] = g_df["eid"].astype(int)
+      g_df["sid"] = g_df["sid"].astype(int)
+      g_df["wep"] = g_df["wep"].astype(int)
+      g_df["x"] = g_df["x"].astype(float).round(2)
+      g_df["y"] = g_df["y"].astype(float).round(2)
 
-      g_keep = ["tick", "eid", "sid", "wep", "x", "y"]
-      g_existing = [c for c in g_keep if c in g_df.columns]
-      g_df = g_df[g_existing]
-
+      g_df = g_df.dropna(subset=["x", "y"])
       g_grouped = g_df.groupby("tick")
   except Exception as e:
     print(f"Error: Failed to parse grenade paths: {e}")
 
+  # TIMELINE
   # convert to timeline list
   timeline = []
   grouped = df.groupby("tick")
 
   for tick, group in grouped:
     # Drop 'tick' from the inner records
-    group_data = group.drop(columns=["tick"])
-    players_data = group_data.values.tolist()
+    players_data = [
+      [
+        int(sid),
+        int(hp),
+        round(float(x), 2),
+        round(float(y), 2),
+        round(float(z), 2),
+        int(rot),
+      ]
+      for sid, hp, x, y, z, rot in zip(
+        group["sid"], group["hp"], group["x"], group["y"], group["z"], group["rot"]
+      )
+    ]
 
     tick_obj = {"t": int(tick), "p": players_data}
     # tick to t
     if g_grouped is not None and tick in g_grouped.groups:
       g_data = g_grouped.get_group(tick).drop(columns=["tick"])
-      tick_obj["g"] = g_data.values.tolist()
+      tick_obj["g"] = [
+        [int(eid), int(sid), int(wep), round(float(x), 2), round(float(y), 2)]
+        for eid, sid, wep, x, y in zip(
+          g_data["eid"], g_data["sid"], g_data["wep"], g_data["x"], g_data["y"]
+        )
+      ]
 
     timeline.append(tick_obj)
 
