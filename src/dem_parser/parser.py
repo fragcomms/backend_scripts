@@ -137,7 +137,9 @@ def parse_game_events(parser, match_start_tick, steamid_map):
       "inferno_expire",
       "inferno_extinguish",
     ]:
-      rename_map.update({"user_steamid": "id", "x": "x", "y": "y", "z": "z"})
+      rename_map.update(
+        {"user_steamid": "id", "entityid": "eid", "x": "x", "y": "y", "z": "z"}
+      )
       wanted_cols += ["id", "eid", "x", "y", "z"]
 
     # Apply Rename
@@ -153,7 +155,7 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     df = df[existing_cols]
 
     for col in df.columns:
-      if col in ["t", "vic", "att", "ass", "id"]:
+      if col in ["t", "vic", "att", "ass", "id", "eid"]:
         df[col] = df[col].fillna(-1).astype(int)
       elif col in ["x", "y", "z"]:
         df[col] = df[col].astype(float).round(2)
