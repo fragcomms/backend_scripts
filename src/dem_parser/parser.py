@@ -263,7 +263,7 @@ def process_ticks(parser, start_tick, end_tick):
     )
     current_id = 0
     for _, row in player_info.iterrows():
-      original_sid = str(row["player_steamid"].split("."))[0]
+      original_sid = str(row["player_steamid"]).split(".")[0]
 
       steamid_map[original_sid] = current_id
       player_lookup[current_id] = {
