@@ -379,25 +379,25 @@ def process_ticks(parser, start_tick, end_tick):
       else:
         g_df["sid"] = -1
 
-      # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly, 6=Incendiary
-      wep_map = {
-        "hegrenade": 1,
-        "smokegrenade": 2,
-        "flashbang": 3,
-        "decoy": 4,
-        "molotov": 5,
-        "incendiarygrenade": 6,
-      }
-
-      def map_grenade_type(name):
-        name_str = str(name)
-        for key, val in wep_map.items():
-          if key in name_str:
-            return val
+      # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly/Incendiary
+      def map_grenade_class(name):
+        name = str(name).lower()
+        if "hegrenade" in name:
+          return 1
+        if "smoke" in name:
+          return 2
+        if "flash" in name:
+          return 3
+        if "decoy" in name:
+          return 4
+        if "molotov" in name:
+          return 5
+        if "incendiary" in name:
+          return 5
         return 0
 
       if "gtype" in g_df.columns:
-        g_df["wep"] = g_df["gtype"].apply(map_grenade_type)
+        g_df["wep"] = g_df["gtype"].apply(map_grenade_class)
       else:
         g_df["wep"] = 0
 
