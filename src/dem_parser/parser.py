@@ -244,11 +244,13 @@ def process_ticks(parser, start_tick, end_tick):
     df.groupby("player_steamid").first()[["player_name", "team_num"]].reset_index()
   )
   player_lookup = {}
-  for _, row in player_info.iterrows():
-    player_lookup[str(row["player_steamid"])] = {
-      "name": row["player_name"],
-      "team": int(row["team_num"]),
-    }
+  if "player_steamid" in df.columns and "player_name" in df.columns and "team_num" in df.columns:
+    player_info = df.groupby("player_steamid").first()[["player_name", "team_num"]].reset_index()
+    for _, row in player_info.iterrows():
+      player_lookup[str(row["player_steamid"])] = {
+        "name": row["player_name"],
+        "team": int(row["team_num"]) if pd.notnull(row["team_num"]) else 0,
+      }
 
   # to make sure we only get alive players during the ticks
   # df = df[df['is_alive'] == True]
@@ -282,6 +284,12 @@ def process_ticks(parser, start_tick, end_tick):
   # Filter to ensure we only have existing columns (avoids errors if a tick is empty)
   existing_cols = [c for c in keep_cols if c in df.columns]
   df = df[existing_cols]
+  
+  df = df.sort_values(by=["sid", "tick"])
+  is_dead = df["hp"] <= 0
+  was_dead_prev = is_dead.groupby(df["sid"]).shift(1, fill_value=False)
+  df = df[~(is_dead & was_dead_prev)]
+  df = df.sort_values(by=["tick"])
 
   # convert to timeline list
   timeline = []
