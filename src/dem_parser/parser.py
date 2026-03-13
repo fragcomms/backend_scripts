@@ -365,9 +365,9 @@ def process_ticks(parser, start_tick, end_tick):
         "X": "x",
         "Y": "y",
         "Z": "z",
-        "entity_id": "eid",
-        "thrower_steamid": "sid",
-        "name": "wep",
+        "grenade_entity_id": "eid",
+        "steamid": "sid",
+        "grenade_type": "gtype",
       }
       g_df = g_df.rename(columns=g_rename)
       g_df = g_df[g_df["tick"].isin(wanted_ticks)]
@@ -379,7 +379,7 @@ def process_ticks(parser, start_tick, end_tick):
       else:
         g_df["sid"] = -1
 
-      # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly/Incendiary
+      # 1=HE, 2=Smoke, 3=Flash, 4=Decoy, 5=Molly, 6=Incendiary
       wep_map = {
         "hegrenade": 1,
         "smokegrenade": 2,
@@ -388,26 +388,32 @@ def process_ticks(parser, start_tick, end_tick):
         "molotov": 5,
         "incendiarygrenade": 6,
       }
-      if "wep" in g_df.columns:
-        g_df["wep"] = g_df["wep"].apply(
-          lambda w: next((v for k, v in wep_map.items() if k in str(w).lower()), 0)
-        )
+
+      def map_grenade_type(name):
+        name_str = str(name)
+        for key, val in wep_map.items():
+          if key in name_str:
+            return val
+        return 0
+
+      if "gtype" in g_df.columns:
+        g_df["wep"] = g_df["gtype"].apply(map_grenade_type)
       else:
         g_df["wep"] = 0
 
-      if "eid" not in g_df.columns:
-        g_df["eid"] = 0
-      if "x" not in g_df.columns:
-        g_df["x"] = 0.0
-      if "y" not in g_df.columns:
-        g_df["y"] = 0.0
+      # for col in ["eid", "sid", "wep", "x", "y", "z"]:
+      #   if col not in g_df.columns:
+      #     g_df[col] = 0 if col in ["eid", "wep"] else (-1 if col == "sid" else 0.0)
+
+      # g_df = g_df.dropna(subset=["x", "y", "z"])
 
       # actually round coordinates
-      g_df["eid"] = g_df["eid"].astype(int)
-      g_df["sid"] = g_df["sid"].astype(int)
-      g_df["wep"] = g_df["wep"].astype(int)
+      g_df["eid"] = g_df["eid"].fillna(0).astype(int)
+      g_df["sid"] = g_df["sid"].fillna(-1).astype(int)
+      g_df["wep"] = g_df["wep"].fillna(0).astype(int)
       g_df["x"] = g_df["x"].astype(float).round(2)
       g_df["y"] = g_df["y"].astype(float).round(2)
+      g_df["z"] = g_df["z"].astype(float).round(2)
 
       g_df = g_df.dropna(subset=["x", "y"])
       g_grouped = g_df.groupby("tick")
@@ -440,9 +446,21 @@ def process_ticks(parser, start_tick, end_tick):
     if g_grouped is not None and tick in g_grouped.groups:
       g_data = g_grouped.get_group(tick).drop(columns=["tick"])
       tick_obj["g"] = [
-        [int(eid), int(sid), int(wep), round(float(x), 2), round(float(y), 2)]
-        for eid, sid, wep, x, y in zip(
-          g_data["eid"], g_data["sid"], g_data["wep"], g_data["x"], g_data["y"]
+        [
+          int(eid),
+          int(sid),
+          int(wep),
+          round(float(x), 2),
+          round(float(y), 2),
+          round(float(z), 2),
+        ]
+        for eid, sid, wep, x, y, z in zip(
+          g_data["eid"],
+          g_data["sid"],
+          g_data["wep"],
+          g_data["x"],
+          g_data["y"],
+          g_data["z"],
         )
       ]
 
