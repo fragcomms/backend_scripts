@@ -80,13 +80,15 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     rename_map = {"tick": "t"}
 
     if event_name == "player_death":
-      rename_map.update = {
-        "user_steamid": "vic",  # Victim
-        "attacker_steamid": "att",  # Attacker
-        "assister_steamid": "ass",  # assister, NaN if none
-        "weapon": "wep",
-        "headshot": "hs",
-      }
+      rename_map.update(
+        {
+          "user_steamid": "vic",  # Victim
+          "attacker_steamid": "att",  # Attacker
+          "assister_steamid": "ass",  # assister, NaN if none
+          "weapon": "wep",
+          "headshot": "hs",
+        }
+      )
       wanted_cols += ["vic", "att", "ass", "wep", "hs"]
 
     elif event_name == "weapon_fire":
