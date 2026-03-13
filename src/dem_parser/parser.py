@@ -56,7 +56,9 @@ def parse_game_events(parser, match_start_tick, steamid_map):
     "flashbang_detonate",
     "smokegrenade_detonate",
     "decoy_detonate",
-    "inferno_startfire",
+    "inferno_startburn",
+    "inferno_expire",
+    "inferno_extinguish",
   ]
   events_df = parser.parse_events(event_names, other=["game_time", "team_num"])
 
@@ -131,10 +133,12 @@ def parse_game_events(parser, match_start_tick, steamid_map):
       "flashbang_detonate",
       "smokegrenade_detonate",
       "decoy_detonate",
-      "inferno_startfire",
+      "inferno_startburn",
+      "inferno_expire",
+      "inferno_extinguish",
     ]:
       rename_map.update({"user_steamid": "id", "x": "x", "y": "y", "z": "z"})
-      wanted_cols += ["id", "x", "y", "z"]
+      wanted_cols += ["id", "eid", "x", "y", "z"]
 
     # Apply Rename
     df = df.rename(columns=rename_map)
