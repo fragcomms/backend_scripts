@@ -278,19 +278,21 @@ def process_ticks(parser, start_tick, end_tick):
   df["x"] = df["x"].astype(float).round(2)
   df["y"] = df["y"].astype(float).round(2)
   df["z"] = df["z"].astype(float).round(2)
-  df["p"] = df["p"].round(0).astype(int)
+  # df["p"] = df["p"].round(0).astype(int)
   df["rot"] = df["rot"].round(0).astype(int)
 
   # rename columns to short keys
 
   # keep ONLY these columns + tick
   # we drop name, team, is_alive, and any other misc
-  keep_cols = ["tick", "sid", "hp", "x", "y", "z", "p", "rot"]
+  # keep_cols = ["tick", "sid", "hp", "x", "y", "z", "p", "rot"]
+  keep_cols = ["tick", "sid", "hp", "x", "y", "z", "rot"]
 
   # Filter to ensure we only have existing columns (avoids errors if a tick is empty)
   existing_cols = [c for c in keep_cols if c in df.columns]
   df = df[existing_cols]
 
+  # dead player comparison
   df = df.sort_values(by=["sid", "tick"])
   is_dead = df["hp"] <= 0
   was_dead_prev = is_dead.groupby(df["sid"]).shift(1, fill_value=False)
@@ -304,9 +306,9 @@ def process_ticks(parser, start_tick, end_tick):
   for tick, group in grouped:
     # Drop 'tick' from the inner records
     group_data = group.drop(columns=["tick"])
-    players_data = group_data.to_dict(orient="records")
-
-    timeline.append({"tick": int(tick), "p": players_data})
+    players_data = group_data.values.tolist()
+    # tick to t
+    timeline.append({"t": int(tick), "p": players_data})
 
   return timeline, player_lookup
 
