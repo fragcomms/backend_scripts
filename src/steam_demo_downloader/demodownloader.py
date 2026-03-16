@@ -8,6 +8,7 @@ import json
 from gevent.queue import Queue
 from gevent.event import AsyncResult
 from dotenv import load_dotenv
+from datetime import timezone
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = (
   "python"  # required for protobuf compilation
@@ -100,7 +101,9 @@ def process_match_data(sharecode, message):
     return
   # logging.info(message)
   match_url = message.matches[0].roundstatsall[-1].map
-  match_time_iso = datetime.fromtimestamp(message.matches[0].matchtime).isoformat()
+  match_time_iso = datetime.fromtimestamp(
+    message.matches[0].matchtime, tz=timezone.utc
+  ).isoformat()
   logging.info(f"Processed: [{sharecode}]")
   # logging.info(f"Download Link: {match_url}")
   logging.info(f"Time: {match_time_iso}")
@@ -168,9 +171,10 @@ def query_sharecode(*args):
   logging.info("Welcomed by GC")
   gevent.spawn(worker_loop)
   gevent.spawn(console_input_listener)
+  # request_queue.put("CSGO-ySXxw-kOz5h-D795M-EuouP-ZbaEC")
   # if sharecode:
   #     request_queue.put(sharecode)
-  #     request_queue.put("CSGO-H4mYW-j8mEB-jwxyH-KBEeK-5b9eD")
+  #     request_queue.put("CSGO-ySXxw-kOz5h-D795M-EuouP-ZbaEC")
   #     request_queue.put("CSGO-82VPt-Px2FC-ViiRG-3SaFk-tXvzF")
 
 
