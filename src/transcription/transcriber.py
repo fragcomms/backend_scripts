@@ -193,11 +193,11 @@ def process_audio(audio_path, prompt=None):
 
       for segment in result["segments"]:
         text = segment["text"].strip()
-        
-        #filter empty strings
+
+        # filter empty strings
         if not text:
           continue
-        
+
         json_data["segments"].append(
           {
             "start": round(segment["start"], 2),
