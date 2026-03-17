@@ -1,3 +1,9 @@
+import warnings
+import logging
+
+warnings.filterwarnings("ignore", category=UserWarning)
+logging.getLogger("whisperx").setLevel(logging.ERROR)
+
 import whisperx
 import gc
 import torch
@@ -120,9 +126,9 @@ def process_audio(audio_path, prompt=None):
   }
 
   vad_options = {
-    "vad_onset": 0.05,
-    "vad_offset": 0.05,
-    "min_duration_on": 0.05,
+    "vad_onset": 0.5,
+    "vad_offset": 0.3,
+    "min_duration_on": 0.15,
     "min_duration_off": 0.2,
   }
 
@@ -186,11 +192,17 @@ def process_audio(audio_path, prompt=None):
       json_data = {"discord_id": track_identifier, "segments": []}
 
       for segment in result["segments"]:
+        text = segment["text"].strip()
+        
+        #filter empty strings
+        if not text:
+          continue
+        
         json_data["segments"].append(
           {
             "start": round(segment["start"], 2),
             "end": round(segment["end"], 2),
-            "text": segment["text"].strip(),
+            "text": text,
           }
         )
 
@@ -200,7 +212,7 @@ def process_audio(audio_path, prompt=None):
       output_files.append(output_file)
 
     except Exception as e:
-      print(f"Error processing track {i + 1}: {e}", sys.stderr)
+      print(f"Error processing track {i + 1}: {e}", file=sys.stderr)
     finally:
       # Clean up temp wav
       if os.path.exists(temp_wav):

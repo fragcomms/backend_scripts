@@ -1,3 +1,31 @@
+[project]
+name = "fragcomms-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "asyncpg>=0.31.0",
+    "csgo>=1.0.0",
+    "demoparser2>=0.41.1",
+    "docopt>=0.6.2",
+    "fastapi>=0.135.1",
+    "grpcio-tools>=1.78.0",
+    "httpx>=0.28.1",
+    "pylint>=4.0.5",
+    "pytest>=9.0.2",
+    "python-dotenv>=1.2.2",
+    "semver>=3.0.4",
+    "soundfile>=0.13.1",
+    "speechbrain>=1.0.3",
+    "tabulate>=0.10.0",
+    "tensorboardx>=2.6.4",
+    "typer>=0.24.1",
+    "uvicorn>=0.42.0",
+    "whisperx>=3.8.2",
+]
+
 [tool.ruff]
 indent-width = 2
 
