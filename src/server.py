@@ -333,15 +333,50 @@ async def check_replay_watcher(job_id: str):
   if watcher.get("demo_id") is not None and watcher.get("transcript_done") is True:
     logger.info(f"Watcher complete for {job_id}. Inserting replay")
 
-    query = """
-    INSERT INTO replays (demo_id, audio_id, name)
-    VALUES ($1, $2, $3)
-    """
-
     try:
       async with db_pool.acquire() as conn:
+        audio_query = """
+        SELECT creation_time, latency_ms
+        FROM audios
+        WHERE audio_id = $1
+        """
+        audio_record = await conn.fetchrow(audio_query, watcher["audio_id"])
+
+        demo_query = """
+        SELECT fetch_time
+        FROM demos
+        WHERE demo_id = $1
+        """
+        demo_record = await conn.fetchrow(demo_query, watcher["demo_id"])
+
+        if not audio_record or not demo_record:
+          raise Exception("Missing audio or demo records for offset calculation")
+
+        audio_start = audio_record["creation_time"]
+        latency = audio_record.get("latency_ms", 0)
+        demo_start = demo_record["fetch_time"]
+
+        from datetime import timezone
+
+        if audio_start.tzinfo is None:
+          audio_start = audio_start.replace(tzinfo=timezone.utc)
+        if demo_start.tzinfo is None:
+          demo_start = demo_start.replace(tzinfo=timezone.utc)
+
+        audio_offset = (audio_start - demo_start).total_seconds() - (latency / 1000.0)
+
+        logger.info(f"Audio offset for {job_id}: {audio_offset}")
+
+        main_insert = """
+        INSERT INTO replays (demo_id, audio_id, name, audio_offset)
+        VALUES ($1, $2, $3, $4)
+        """
         await conn.execute(
-          query, watcher["demo_id"], watcher["audio_id"], watcher["replay_name"]
+          main_insert,
+          watcher["demo_id"],
+          watcher["audio_id"],
+          watcher["replay_name"],
+          audio_offset,
         )
       logger.info(f"Successfully created replay: {watcher['replay_name']}")
 
