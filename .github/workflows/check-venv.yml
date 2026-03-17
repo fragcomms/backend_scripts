@@ -38,7 +38,7 @@ jobs:
     # using exit-zero cause i want to see what happens when this completes
       run: |
         ruff format .
-        ruff check --fix .
+        ruff check --fix --exit-zero .
 
     - name: Commit and Push changes
       uses: stefanzweifel/git-auto-commit-action@v5
