@@ -335,6 +335,7 @@ async def check_replay_watcher(job_id: str):
 
     try:
       async with db_pool.acquire() as conn:
+        # grab audio and demo query for sync
         audio_query = """
         SELECT creation_time, latency_ms
         FROM audios
@@ -343,7 +344,7 @@ async def check_replay_watcher(job_id: str):
         audio_record = await conn.fetchrow(audio_query, watcher["audio_id"])
 
         demo_query = """
-        SELECT fetch_time
+        SELECT fetch_time, length_ticks
         FROM demos
         WHERE demo_id = $1
         """
@@ -353,7 +354,9 @@ async def check_replay_watcher(job_id: str):
           raise Exception("Missing audio or demo records for offset calculation")
 
         audio_start = audio_record["creation_time"]
-        latency = audio_record.get("latency_ms", 0)
+        latency_ms = audio_record.get(
+          "latency_ms", 0
+        )  # fallback to 0 if recording ended too fast
         demo_start = demo_record["fetch_time"]
 
         from datetime import timezone
@@ -363,13 +366,36 @@ async def check_replay_watcher(job_id: str):
         if demo_start.tzinfo is None:
           demo_start = demo_start.replace(tzinfo=timezone.utc)
 
-        audio_offset = (audio_start - demo_start).total_seconds() - (latency / 1000.0)
+        audio_start_ms = (audio_start.timestamp() * 1000) - latency_ms
+        demo_start_ms = demo_start.timestamp() * 1000
+        demo_duration_ms = (
+          demo_record["length_ticks"] * 64
+        ) * 1000  # 64 because it is valve's tick system
+        demo_end_ms = demo_start_ms + demo_duration_ms
 
-        logger.info(f"Audio offset for {job_id}: {audio_offset}")
+        audio_starts_first = False
+
+        if audio_start_ms < demo_start_ms:
+          # audio is before demo
+          audio_offset = int(round(demo_start_ms - audio_start_ms))
+          audio_starts_first = True
+          logger.info(f"Audio started BEFORE demo. Offset: {audio_offset}ms")
+        elif demo_start_ms <= audio_start_ms <= demo_end_ms:
+          # audio is during demo
+          audio_offset = int(round(audio_start_ms - demo_start_ms))
+          audio_starts_first = False
+          logger.info(f"Audio started DURING demo. Offset: {audio_offset}ms")
+        else:
+          # audio is after demo
+          logger.warning(
+            f"[WARNING] Audio for {job_id} started AFTER the match ended! Audio: {audio_start_ms}, Demo End: {demo_start_ms}"
+          )
+          audio_offset = -1
+          audio_starts_first = False
 
         main_insert = """
-        INSERT INTO replays (demo_id, audio_id, name, audio_offset)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO replays (demo_id, audio_id, name, audio_offset, audio_starts_first)
+        VALUES ($1, $2, $3, $4, $5)
         """
         await conn.execute(
           main_insert,
@@ -377,6 +403,7 @@ async def check_replay_watcher(job_id: str):
           watcher["audio_id"],
           watcher["replay_name"],
           audio_offset,
+          audio_starts_first,
         )
       logger.info(f"Successfully created replay: {watcher['replay_name']}")
 
