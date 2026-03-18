@@ -2,22 +2,30 @@ import warnings
 import logging
 
 warnings.filterwarnings("ignore", category=UserWarning)
-logging.getLogger("whisperx").setLevel(logging.ERROR)
 
-import whisperx
 import gc
 import torch
 import os
 import subprocess
 import json
 import sys
+import soundfile as sf  
 
-# config - TODO: identify if theres anything else required or "nice to haves" for configuration
-DEVICE = "cuda"
-BATCH_SIZE = 4
-COMPUTE_TYPE = "float16"
-MODEL_TYPE = "large-v3"
+logging.getLogger("nemo_logger").setLevel(logging.ERROR)
+
+from nemo.collections.asr.models import EncDecMultiTaskModel
+
+# Configuration
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+MODEL_TYPE = "nvidia/canary-1b-v2"
 OUTPUT_DIR = None
+
+print("Loading Silero VAD...", file=sys.stdout)
+vad_model, vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                      model='silero_vad',
+                                      trust_repo=True)
+get_speech_timestamps = vad_utils[0]
+read_audio = vad_utils[2]
 
 
 def get_output_dir(dir, audio_path):
@@ -31,79 +39,44 @@ def get_output_dir(dir, audio_path):
 
 
 def get_audio_track_count(filepath):
-  """Uses ffprobe to count number of audio streams."""
   try:
     cmd = [
-      "ffprobe",
-      "-v",
-      "error",
-      "-select_streams",
-      "a",
-      "-show_entries",
-      "stream=index",
-      "-of",
-      "csv=p=0",
-      filepath,
+      "ffprobe", "-v", "error", "-select_streams", "a",
+      "-show_entries", "stream=index", "-of", "csv=p=0", filepath,
     ]
     output = subprocess.check_output(cmd, text=True).strip()
-    if not output:
-      return 0
+    if not output: return 0
     return len(output.splitlines())
   except subprocess.CalledProcessError:
-    print(
-      "Error: Could not determine audio tracks. Is ffprobe installed?", file=sys.stderr
-    )
-    return
+    print("Error: Could not determine audio tracks. Is ffprobe installed?", file=sys.stderr)
+    return 0
 
 
 def get_track_title(filepath, track_index):
-  """Uses ffprobe to extract the 'title' metadata (User ID) from a specific track."""
   try:
     cmd = [
-      "ffprobe",
-      "-v",
-      "error",
-      "-select_streams",
-      f"a:{track_index}",
-      "-show_entries",
-      "stream_tags=title",
-      "-of",
-      "csv=p=0",
-      filepath,
+      "ffprobe", "-v", "error", "-select_streams", f"a:{track_index}",
+      "-show_entries", "stream_tags=title", "-of", "csv=p=0", filepath,
     ]
     output = subprocess.check_output(cmd, text=True).strip()
-    # Basic sanitization to ensure valid filename (alphanumeric + underscores/dashes)
-    # Discord IDs are just numbers, but this is safe fallback
     return output if output else None
   except Exception:
     return None
 
 
 def extract_track(input_path, track_index, output_wav):
-  """Extracts a specific audio track to a temp WAV file (16kHz mono)."""
   cmd = [
-    "ffmpeg",
-    "-y",
-    "-v",
-    "error",
-    "-i",
-    input_path,
-    "-map",
-    f"0:a:{track_index}",
-    "-ac",
-    "1",  # mono
-    "-ar",
-    "16000",
-    output_wav,
+    "ffmpeg", "-y", "-v", "error", "-i", input_path,
+    "-map", f"0:a:{track_index}", "-ac", "1", "-ar", "16000", output_wav,
   ]
   subprocess.run(cmd, check=True)
 
 
 def process_audio(audio_path, prompt=None):
-  # error checking
   audio_file = os.path.abspath(audio_path)
   if not os.path.exists(audio_file):
     raise FileNotFoundError(f"File not found at {audio_file}")
+    
   num_tracks = get_audio_track_count(audio_file)
   print(f"Processing: {audio_file}", file=sys.stdout)
 
@@ -112,100 +85,106 @@ def process_audio(audio_path, prompt=None):
 
   save_dir = get_output_dir(OUTPUT_DIR, audio_file)
   base_audio_name = os.path.splitext(os.path.basename(audio_file))[0]
-  print(f"Output directory set to: {save_dir}", file=sys.stdout)
+  
+  print(f"Loading NeMo Model: {MODEL_TYPE}...", file=sys.stdout)
+  
+  # load model into ram first
+  model = EncDecMultiTaskModel.from_pretrained(model_name=MODEL_TYPE, map_location="cpu")
+  model.eval()
 
-  vocab = "Rush B, CT, T spawn, lit, one tap, eco, drop, awp, mid, rotate, flank, default, plant, defuse, peek, flash, smoke."
+  if DEVICE == "cuda":
+    # float32 is computationally expensive, so we use bfloat16 because its cheaper on vram usage
+    model = model.bfloat16()
+    model = model.cuda()
 
-  # set up for transcribing
-  asr_options = {
-    "initial_prompt": prompt if prompt else vocab,
-    "condition_on_previous_text": False,
-    "beam_size": 5,
-    "patience": 2.0,
-    "temperatures": [0.0, 0.2, 0.4],
-  }
+  decode_cfg = model.cfg.decoding
+  decode_cfg.beam.beam_size = 8
+  decode_cfg.beam.len_pen = 1.0
+  model.change_decoding_strategy(decode_cfg)
 
-  vad_options = {
-    "vad_onset": 0.5,
-    "vad_offset": 0.3,
-    "min_duration_on": 0.15,
-    "min_duration_off": 0.2,
-  }
-
-  model = whisperx.load_model(
-    MODEL_TYPE,
-    DEVICE,
-    compute_type=COMPUTE_TYPE,
-    vad_method="silero",  # required because pyannote is broken
-    asr_options=asr_options,
-    vad_options=vad_options,
-  )
   output_files = []
 
   for i in range(num_tracks):
     user_id = get_track_title(audio_file, i)
     track_identifier = user_id if user_id else f"track_{i + 1}"
-    print(
-      f"Processing Track {i + 1}/{num_tracks} (ID: {track_identifier})",
-      file=sys.stdout,
-    )
+    print(f"\nProcessing Track {i + 1}/{num_tracks} (ID: {track_identifier})", file=sys.stdout)
 
-    # Create temp file for this track
     temp_wav = os.path.join(save_dir, f"temp_{base_audio_name}_{track_identifier}.wav")
     output_file = os.path.join(save_dir, f"{base_audio_name}_{track_identifier}.json")
+    json_data = {"discord_id": track_identifier, "segments": []}
 
     try:
-      # Extract specific track
       extract_track(audio_file, i, temp_wav)
 
-      # Load audio
-      # using an analogy - load the gun
-      audio = whisperx.load_audio(temp_wav)
-
-      # Transcribe - shoot the gun
-      # forcing the language to english for now because
-      # the majority of comms are in english
-      result = model.transcribe(audio, batch_size=BATCH_SIZE, language="en")
-
-      # Align - inspect the aftermath and readjust shooting angle
-      # We load/unload align model per track because language might differ per track (highly unlikely)
-      print(f"Aligning Track {i + 1} ({result['language']})", file=sys.stdout)
-      model_a, metadata = whisperx.load_align_model(
-        language_code=result["language"], device=DEVICE
-      )
-      result = whisperx.align(
-        result["segments"],
-        model_a,
-        metadata,
-        audio,
-        DEVICE,
-        return_char_alignments=False,
+      # silero vad to smart slice
+      wav = read_audio(temp_wav)
+      speech_timestamps = get_speech_timestamps(
+        wav, 
+        vad_model, 
+        sampling_rate=16000,
+        threshold=0.75,                
+        min_speech_duration_ms=250,   
+        min_silence_duration_ms=500,  
+        speech_pad_ms=150             
       )
 
-      # Cleanup Align Model to save vram
-      gc.collect()
-      torch.cuda.empty_cache()
-      del model_a
+      audio_data, sample_rate = sf.read(temp_wav)
+      
+      batch_paths = []
+      batch_offsets = []
+      chunk_idx = 0
 
-      print(f"Writing to {os.path.basename(output_file)}", file=sys.stdout)
+      # slice the audio into separate portions so my vram doesn't die
+      for stamp in speech_timestamps:
+        seg_start = stamp['start']
+        seg_end = stamp['end']
+        max_samples = int(60.0 * sample_rate)
 
-      json_data = {"discord_id": track_identifier, "segments": []}
+        while seg_start < seg_end:
+          chunk_end = min(seg_start + max_samples, seg_end)
+          time_offset = seg_start / sample_rate
+          
+          chunk_data = audio_data[seg_start:chunk_end]
+          chunk_path = os.path.join(save_dir, f"chunk_{chunk_idx}_{track_identifier}.wav")
+          sf.write(chunk_path, chunk_data, sample_rate)
+          
+          batch_paths.append(chunk_path)
+          batch_offsets.append((time_offset, chunk_end / sample_rate))
+          
+          seg_start = chunk_end
+          chunk_idx += 1
 
-      for segment in result["segments"]:
-        text = segment["text"].strip()
+      # transcribe
+      if batch_paths:
+        print(f"  -> Transcribing {len(batch_paths)} segments in true batches...", file=sys.stdout)
+        
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+          outputs = model.transcribe(
+            audio=batch_paths, 
+            batch_size=8, 
+            task='asr', source_lang='en', target_lang='en', pnc='no', timestamps=False
+          )
 
-        # filter empty strings
-        if not text:
-          continue
+        # 5. Map the outputs back to their saved timestamps
+        for idx, out in enumerate(outputs):
+          if out:
+            text = out.text.strip()
+            if text:
+              start_time_sec, end_time_sec = batch_offsets[idx]
+              
+              json_data["segments"].append({
+                "start": round(start_time_sec, 2),
+                "end": round(end_time_sec, 2),
+                "text": text,
+              })
 
-        json_data["segments"].append(
-          {
-            "start": round(segment["start"], 2),
-            "end": round(segment["end"], 2),
-            "text": text,
-          }
-        )
+      # Clean up all the mini-chunks to save disk space
+      for path in batch_paths:
+        if os.path.exists(path):
+          os.remove(path)
 
+      # Write final JSON
+      print(f"Writing stitched output to {os.path.basename(output_file)}", file=sys.stdout)
       with open(output_file, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=2, ensure_ascii=False)
 
@@ -214,18 +193,16 @@ def process_audio(audio_path, prompt=None):
     except Exception as e:
       print(f"Error processing track {i + 1}: {e}", file=sys.stderr)
     finally:
-      # Clean up temp wav
       if os.path.exists(temp_wav):
         os.remove(temp_wav)
 
+  del model
   gc.collect()
   torch.cuda.empty_cache()
-  del model
 
   return output_files
 
 
-# main function used for debugging
 def main():
   if len(sys.argv) < 2:
     print("Usage: python transcriber.py <audio_path> [prompt]", sys.stderr)
@@ -242,7 +219,7 @@ def main():
         "type": "transcribe_complete",
         "payload": {
           "filepath": filepath,
-          "model_id": "1",
+          "model_id": "1", 
           "original_audio": audio_path,
         },
       }
