@@ -369,8 +369,8 @@ async def check_replay_watcher(job_id: str):
         audio_start_ms = (audio_start.timestamp() * 1000) - latency_ms
         demo_start_ms = demo_start.timestamp() * 1000
         demo_duration_ms = (
-          demo_record["length_ticks"] * 64
-        ) * 1000  # 64 because it is valve's tick system
+          demo_record["length_ticks"] / 64
+        ) * 1000  # convert 64 tick/s timeline to milliseconds
         demo_end_ms = demo_start_ms + demo_duration_ms
 
         audio_starts_first = False
@@ -388,7 +388,7 @@ async def check_replay_watcher(job_id: str):
         else:
           # audio is after demo
           logger.warning(
-            f"[WARNING] Audio for {job_id} started AFTER the match ended! Audio: {audio_start_ms}, Demo End: {demo_start_ms}"
+            f"[WARNING] Audio for {job_id} started AFTER the match ended! Audio: {audio_start_ms}, Demo End: {demo_end_ms}"
           )
           audio_offset = -1
           audio_starts_first = False
