@@ -5,8 +5,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("whisperx").setLevel(logging.ERROR)
 
 import torchaudio
+
 if not hasattr(torchaudio, "list_audio_backends"):
-    torchaudio.list_audio_backends = lambda: ["soundfile"]
+  torchaudio.list_audio_backends = lambda: ["soundfile"]
 
 import whisperx
 import gc
