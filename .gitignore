@@ -13,3 +13,4 @@ src/steam_demo_downloader/cs2module/*
 !src/steam_demo_downloader/cs2module/protobufs.py
 *.mka
 *.json
+*.lock
