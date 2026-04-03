@@ -14,3 +14,4 @@ src/steam_demo_downloader/cs2module/*
 *.mka
 *.json
 *.lock
+*.sh
