@@ -166,11 +166,42 @@ def start_csgo():
   cs2.send_hello()
 
 
+# apparently steam disconnects our account if we ever log on for too long
+# i am too lazy to look at the debug so i will leave this as a potential solution
+@client.on("disconnected")
+def on_disconnect():
+  logging.warning("Disconnected from Steam. Attempting to reconnect...")
+  gevent.sleep(5)
+  client.reconnect()
+
+
+# one potential solution
+@client.on("relogged")
+def handle_relog():
+  logging.info("Relogged successfully. Re-launching CS2 session...")
+  client.games_played([730])
+  gevent.sleep(2)
+  cs2.send_hello()
+
+
+# heartbeat keep alive
+# also a potential solution
+def gc_keep_alive():
+  while True:
+    if cs2.ready:
+      # Sending a 'Hello' or even an empty 'MatchList' request
+      # keeps the GC session from timing out.
+      cs2.send_hello()
+      logging.debug("Sent heartbeat to GC")
+    gevent.sleep(30)  # Every 30 seconds
+
+
 @cs2.on(4004)  # welcomed
 def query_sharecode(*args):
   logging.info("Welcomed by GC")
   gevent.spawn(worker_loop)
   gevent.spawn(console_input_listener)
+  gevent.spawn(gc_keep_alive)
   # request_queue.put("CSGO-ySXxw-kOz5h-D795M-EuouP-ZbaEC")
   # if sharecode:
   #     request_queue.put(sharecode)
@@ -192,6 +223,12 @@ def on_match_list(message):
 
 
 if __name__ == "__main__":
-  logging.info("Steam account service started")
-  client.cli_login(username=bot_user, password=bot_pw)
-  client.run_forever()
+  try:
+    logging.info("Steam account service started")
+    client.cli_login(username=bot_user, password=bot_pw)
+    client.run_forever()
+  except KeyboardInterrupt:
+    logging.info("Shutting down...")
+    sys.exit(0)
+  except Exception as e:
+    logging.error(f"Fatal error: {e}")
