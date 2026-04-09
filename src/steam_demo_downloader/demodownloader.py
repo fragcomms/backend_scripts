@@ -188,12 +188,13 @@ def handle_relog():
 # also a potential solution
 def gc_keep_alive():
   while True:
-    if cs2.ready:
-      # Sending a 'Hello' or even an empty 'MatchList' request
-      # keeps the GC session from timing out.
-      cs2.send_hello()
-      logging.debug("Sent heartbeat to GC")
-    gevent.sleep(30)  # Every 30 seconds
+    if client.logged_on:
+      try:
+        cs2.send_hello()
+        logging.debug("Sent heartbeat to GC")
+      except Exception as e:
+        logging.error(f"Heartbeat failed: {e}")
+    gevent.sleep(300)
 
 
 @cs2.on(4004)  # welcomed
