@@ -48,6 +48,8 @@ request_queue = Queue()
 current_job_result = None
 match_links = None
 
+workers_started = False
+
 
 def console_input_listener():
   logging.info("Listening for sharecodes via stdin...")
@@ -162,7 +164,7 @@ def download_replay(url, sharecode, match_time_iso, output_dir=DEMO_OUTPUT_DIR):
 def start_csgo():
   logging.info("Logged into Steam.")
   client.games_played([730])  # mimick bot playing cs2
-  gevent.sleep(1)  # sleep required as steam takes a while to register events
+  gevent.sleep(2)  # sleep required as steam takes a while to register events
   cs2.send_hello()
 
 
@@ -170,9 +172,10 @@ def start_csgo():
 # i am too lazy to look at the debug so i will leave this as a potential solution
 @client.on("disconnected")
 def on_disconnect():
-  logging.warning("Disconnected from Steam. Attempting to reconnect...")
+  logging.warning("Disconnected from Steam. Re-authenticating...")
   gevent.sleep(5)
-  client.reconnect()
+  # Re-login is safer than reconnect for long-running bots
+  client.cli_login(username=bot_user, password=bot_pw)
 
 
 # one potential solution
@@ -199,10 +202,17 @@ def gc_keep_alive():
 
 @cs2.on(4004)  # welcomed
 def query_sharecode(*args):
+  global workers_started
   logging.info("Welcomed by GC")
-  gevent.spawn(worker_loop)
-  gevent.spawn(console_input_listener)
-  gevent.spawn(gc_keep_alive)
+
+  if not workers_started:
+    logging.info("Starting background worker threads...")
+    gevent.spawn(worker_loop)
+    gevent.spawn(console_input_listener)
+    gevent.spawn(gc_keep_alive)
+    workers_started = True
+  else:
+    logging.info("GC re-connected; workers already running.")
   # request_queue.put("CSGO-ySXxw-kOz5h-D795M-EuouP-ZbaEC")
   # if sharecode:
   #     request_queue.put(sharecode)
