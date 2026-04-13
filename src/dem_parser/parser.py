@@ -475,190 +475,226 @@ def process_ticks(parser, start_tick, end_tick):
   return timeline, player_lookup, steamid_map
 
 
-def calculate_advanced_stats(parser):
-  events_df = parser.parse_events(
-    ["player_hurt", "player_death", "round_end"],
-    other=["total_rounds_played", "team_num", "game_time"],
-  )
-
-  # Extract the dataframes
-  hurt_df = pd.DataFrame()
-  death_df = pd.DataFrame()
-  round_end_df = pd.DataFrame()
-
-  for event_name, df in events_df:
-    if df is None or df.empty:
-      continue
-    if event_name == "player_hurt":
-      hurt_df = df
-    elif event_name == "player_death":
-      death_df = df
-    elif event_name == "round_end":
-      round_end_df = df
-
-  if hurt_df.empty or death_df.empty or round_end_df.empty:
-    return {}
-
-  # Standardize round numbers (total_rounds_played increments when round ends)
-  # We add 1 so round 0 becomes round 1
-  hurt_df["round"] = hurt_df["total_rounds_played"] + 1
-  death_df["round"] = death_df["total_rounds_played"] + 1
-  round_end_df["round"] = round_end_df["total_rounds_played"] + 1
-
-  stats_per_player = {}
-
-  def init_player(sid):
-    if sid not in stats_per_player and pd.notna(sid):
-      stats_per_player[sid] = {
-        "rounds_played": 0,
-        "kills": 0,
-        "assists": 0,
-        "deaths": 0,
-        "hs_kills": 0,
-        "damage": 0,
-        "util_damage": 0,
-        "first_kills": 0,
-        "first_deaths": 0,
-        "kast_rounds": 0,
-        "1v1_won": 0,
-        "1v2_won": 0,
-        "1v3_won": 0,
-        "1v4_won": 0,
-        "1v5_won": 0,
-        "per_round_data": {},
-      }
-
-  # Group by rounds
-  rounds = round_end_df["round"].unique()
-
-  for r in rounds:
-    r_hurts = hurt_df[hurt_df["round"] == r]
-    r_deaths = death_df[death_df["round"] == r].sort_values("tick")
-
-    # Get the winner of the round
-    r_end = round_end_df[round_end_df["round"] == r]
-    winner_team = r_end.iloc[0]["winner"] if not r_end.empty else None
-
-    # Track first kill/death
-    if not r_deaths.empty:
-      fk_event = r_deaths.iloc[0]
-      att_fk = fk_event.get("attacker_steamid")
-      vic_fd = fk_event.get("user_steamid")
-
-      if pd.notna(att_fk):
-        init_player(att_fk)
-        stats_per_player[att_fk]["first_kills"] += 1
-      if pd.notna(vic_fd):
-        init_player(vic_fd)
-        stats_per_player[vic_fd]["first_deaths"] += 1
-
-    # Track Kills, Deaths, Assists, HS, KAST Trades, and 1vX
-    alive_players = {2: set(), 3: set()}  # 2 = T, 3 = CT
-    # Populate initial alive players for this round (Requires basic team mapping)
-    # For simplicity, we add them to the set as they appear in the event logs
-    for _, row in r_deaths.iterrows():
-      if pd.notna(row["user_steamid"]):
-        alive_players[row["team_num"]].add(row["user_steamid"])
-
-    round_kast_achieved = set()
-
-    for _, death in r_deaths.iterrows():
-      vic = death.get("user_steamid")
-      att = death.get("attacker_steamid")
-      ass = death.get("assister_steamid")
-      hs = death.get("headshot")
-      tick = death.get("tick")
-
-      # Remove victim from alive players
-      vic_team = death.get("team_num")
-      if vic in alive_players.get(vic_team, set()):
-        alive_players[vic_team].remove(vic)
-
-      # Check for 1vX Situation (Victim dies, leaving 1 guy alive on their team)
-      # Actually, we want to check if the ATTACKER'S team is in a 1vX.
-      if pd.notna(att):
-        att_team = 2 if vic_team == 3 else 3  # Opposite team
-        if len(alive_players.get(att_team, set())) == 1:
-          last_alive = list(alive_players[att_team])[0]
-          # if the intial team wins, it is a 1vX clutch
-          if att_team == winner_team and r_deaths.iloc[-1]["user_steamid"] == vic:
-            enemies_alive_at_start_of_clutch = (
-              len(alive_players.get(vic_team, set())) + 1
-            )
-            clutch_key = f"1v{min(enemies_alive_at_start_of_clutch, 5)}_won"
-            init_player(last_alive)
-            stats_per_player[last_alive][clutch_key] += 1
-
-      if pd.notna(att) and att != vic:  # Kill
-        init_player(att)
-        stats_per_player[att]["kills"] += 1
-        if hs:
-          stats_per_player[att]["hs_kills"] += 1
-        round_kast_achieved.add(att)  # KAST: Kill
-
-      if pd.notna(ass):  # Assist
-        init_player(ass)
-        stats_per_player[ass]["assists"] += 1
-        round_kast_achieved.add(ass)  # KAST: Assist
-
-      if pd.notna(vic):  # Death
-        init_player(vic)
-        stats_per_player[vic]["deaths"] += 1
-
-        # KAST: Trade check (Did the killer die within ~5 seconds?)
-        # 5 seconds * 64 ticks = 320 ticks
-        killer_death = r_deaths[
-          (r_deaths["user_steamid"] == att)
-          & (r_deaths["tick"] > tick)
-          & (r_deaths["tick"] <= tick + 320)
-        ]
-        if not killer_death.empty:
-          round_kast_achieved.add(vic)  # KAST: Traded
-
-    # Calculate Damage
-    for _, hurt in r_hurts.iterrows():
-      att = hurt.get("attacker_steamid")
-      vic = hurt.get("user_steamid")
-      dmg = hurt.get("dmg_health")
-      wep = hurt.get("weapon")
-
-      # Don't count self-damage or team damage
-      if pd.notna(att) and pd.notna(vic) and att != vic:
-        # NOTE: You should ideally check if att_team != vic_team here
-        init_player(att)
-        stats_per_player[att]["damage"] += dmg
-
-        if str(wep) in ["hegrenade", "inferno", "molotov", "incgrenade"]:
-          stats_per_player[att]["util_damage"] += dmg
-
-    # Final KAST processing for Survived
-    # Anyone who participated in the round but didn't die gets Survived
-    all_players_in_round = set(r_hurts["user_steamid"].dropna()).union(
-      set(r_hurts["attacker_steamid"].dropna())
+def calculate_advanced_stats(parser, start_tick, end_tick):
+    # Notice we no longer need 'total_rounds_played'
+    events_df = parser.parse_events(
+        ["player_hurt", "player_death", "round_start"]
     )
+    
+    hurt_df = pd.DataFrame()
+    death_df = pd.DataFrame()
+    round_start_df = pd.DataFrame()
+    
+    for event_name, df in events_df:
+        if df is None or df.empty: continue
+        if event_name == "player_hurt": hurt_df = df
+        elif event_name == "player_death": death_df = df
+        elif event_name == "round_start": round_start_df = df
 
-    for p in all_players_in_round:
-      init_player(p)
-      stats_per_player[p]["rounds_played"] += 1
+    if hurt_df.empty or death_df.empty or round_start_df.empty:
+        return {}
 
-      # KAST: Survived
-      if p not in r_deaths["user_steamid"].values:
-        round_kast_achieved.add(p)
+    # 1. FILTER OUT WARMUP & POST-MATCH
+    hurt_df = hurt_df[(hurt_df['tick'] >= start_tick) & (hurt_df['tick'] <= end_tick)].copy()
+    death_df = death_df[(death_df['tick'] >= start_tick) & (death_df['tick'] <= end_tick)].copy()
+    round_start_df = round_start_df[round_start_df['tick'] >= start_tick].copy()
 
-      if p in round_kast_achieved:
-        stats_per_player[p]["kast_rounds"] += 1
+    # 2. BUILD PROPER ROUND INTERVALS
+    # A round spans from its start_tick to the NEXT round's start_tick (or match end)
+    round_start_df = round_start_df.sort_values("tick")
+    start_ticks = round_start_df['tick'].tolist()
+    
+    if not start_ticks:
+        return {}
+        
+    round_intervals = []
+    for i in range(len(start_ticks)):
+        current_start = start_ticks[i]
+        next_start = start_ticks[i+1] if i + 1 < len(start_ticks) else end_tick + 1
+        round_intervals.append((current_start, next_start))
+        
+    # Map every event to a specific round index
+    def get_round_idx(tick):
+        for idx, (start, end) in enumerate(round_intervals):
+            if start <= tick < end:
+                return idx
+        return -1
 
-  # Post-process into final metrics
-  for sid, stats in stats_per_player.items():
-    rp = max(stats["rounds_played"], 1)  # avoid division by zero
-    kills = max(stats["kills"], 1)
+    hurt_df['round'] = hurt_df['tick'].apply(get_round_idx)
+    death_df['round'] = death_df['tick'].apply(get_round_idx)
+    
+    # Drop orphaned events that somehow didn't fit into a valid match round
+    hurt_df = hurt_df[hurt_df['round'] != -1]
+    death_df = death_df[death_df['round'] != -1]
 
-    stats["kast_pct"] = round((stats["kast_rounds"] / rp) * 100, 1)
-    stats["adr"] = round(stats["damage"] / rp, 1)
-    stats["hs_pct"] = round((stats["hs_kills"] / kills) * 100, 1)
-    stats["util_adr"] = round(stats["util_damage"] / rp, 1)
+    stats_per_player = {}
 
-  return stats_per_player
+    def init_player(name):
+        if pd.notna(name) and name not in stats_per_player:
+            stats_per_player[name] = {
+                "rounds_played": 0, "kills": 0, "assists": 0, "deaths": 0, 
+                "hs_kills": 0, "damage": 0, "util_damage": 0, 
+                "first_kills": 0, "first_deaths": 0,
+                "kast_rounds": 0, "3k": 0, "4k": 0, "5k": 0
+            }
+
+    start_states = parser.parse_ticks(["player_name", "team_num"], ticks=start_ticks)
+
+    # 3. PROCESS EACH ROUND INDEPENDENTLY
+    for r_idx in range(len(round_intervals)):
+        r_hurts = hurt_df[hurt_df['round'] == r_idx]
+        r_deaths = death_df[death_df['round'] == r_idx].sort_values("tick")
+        r_start_tick = start_ticks[r_idx]
+        
+        round_players = set()
+        player_teams = {} 
+        
+        # Get team alignments at the exact start of the round
+        if not start_states.empty:
+            r_state = start_states[start_states['tick'] == r_start_tick]
+            for _, row in r_state.iterrows():
+                pname = row.get('player_name')
+                team = row.get('team_num')
+                if pd.notna(pname):
+                    round_players.add(pname)
+                    if pd.notna(team):
+                        player_teams[pname] = team
+        
+        # Add anyone who dealt damage or died, in case they reconnected mid-round
+        active_in_round = set(r_hurts['user_name'].dropna()).union(
+                          set(r_hurts['attacker_name'].dropna())).union(
+                          set(r_deaths['user_name'].dropna()))
+        round_players.update(active_in_round)
+
+        # --- First Kills / Deaths ---
+        if not r_deaths.empty:
+            for _, fk_event in r_deaths.iterrows():
+                att_fk = fk_event.get('attacker_name')
+                vic_fd = fk_event.get('user_name')
+                
+                att_team = player_teams.get(att_fk, "att_unknown")
+                vic_team = player_teams.get(vic_fd, "vic_unknown")
+                
+                if pd.notna(att_fk) and pd.notna(vic_fd) and att_fk != vic_fd and att_team != vic_team:
+                    init_player(att_fk)
+                    stats_per_player[att_fk]["first_kills"] += 1
+                    init_player(vic_fd)
+                    stats_per_player[vic_fd]["first_deaths"] += 1
+                    break 
+
+        round_kast_achieved = set()
+        round_kill_tally = {}
+        
+        # --- Deaths, Kills, Assists, Trades ---
+        for _, death in r_deaths.iterrows():
+            vic = death.get('user_name')
+            att = death.get('attacker_name')
+            ass = death.get('assister_name')
+            hs = death.get('headshot')
+            tick = int(death.get('tick'))
+            
+            vic_team = player_teams.get(vic, "vic_unknown")
+            att_team = player_teams.get(att, "att_unknown")
+            ass_team = player_teams.get(ass, "ass_unknown")
+            
+            # KILLS
+            if pd.notna(att) and att != vic and att_team != vic_team:  
+                init_player(att)
+                stats_per_player[att]["kills"] += 1
+                if hs: stats_per_player[att]["hs_kills"] += 1
+                round_kast_achieved.add(att)
+                
+                round_kill_tally[att] = round_kill_tally.get(att, 0) + 1
+                
+            # ASSISTS
+            if pd.notna(ass) and ass_team != vic_team: 
+                init_player(ass)
+                stats_per_player[ass]["assists"] += 1
+                round_kast_achieved.add(ass)
+                
+            # DEATHS & TRADES
+            if pd.notna(vic): 
+                init_player(vic)
+                stats_per_player[vic]["deaths"] += 1
+                
+                # Trade check (Killer is avenged within ~5 seconds)
+                killer_death = r_deaths[(r_deaths['user_name'] == att) & 
+                                        (r_deaths['tick'] > tick) & 
+                                        (r_deaths['tick'] <= tick + 320)]
+                if not killer_death.empty:
+                    round_kast_achieved.add(vic)
+
+        # --- Multi-kills ---
+        for player_name, round_kills in round_kill_tally.items():
+            if round_kills == 3:
+                stats_per_player[player_name]["3k"] += 1
+            elif round_kills == 4:
+                stats_per_player[player_name]["4k"] += 1
+            elif round_kills >= 5: 
+                stats_per_player[player_name]["5k"] += 1
+
+        # --- Damage ---
+        # Sort hurts chronologically so damage applies in the correct order
+        r_hurts = r_hurts.sort_values("tick")
+        
+        # Every player enters the round with a strict maximum of 100 HP to "give"
+        victim_health_pool = {p: 100 for p in round_players}
+
+        for _, hurt in r_hurts.iterrows():
+            att = hurt.get('attacker_name')
+            vic = hurt.get('user_name')
+            
+            try:
+                dmg = int(hurt.get('dmg_health', 0))
+            except (ValueError, TypeError):
+                dmg = 0
+                
+            wep = hurt.get('weapon')
+            
+            if pd.isna(vic): 
+                continue
+
+            vic_team = player_teams.get(vic, "vic_unknown")
+            att_team = player_teams.get(att, "att_unknown")
+            
+            # 1. Cap the damage at whatever health the victim actually has left
+            available_hp = victim_health_pool.get(vic, 100)
+            actual_dmg = min(dmg, available_hp)
+            
+            # 2. Subtract this damage from the victim's pool so overkill/corpse-hitting is nullified
+            victim_health_pool[vic] = available_hp - actual_dmg
+            
+            # 3. Only award damage if it's a valid enemy attacker
+            if pd.notna(att) and att != vic and att_team != vic_team and actual_dmg > 0:
+                init_player(att)
+                stats_per_player[att]["damage"] += actual_dmg
+                if str(wep) in ['hegrenade', 'inferno', 'molotov', 'incgrenade']:
+                    stats_per_player[att]["util_damage"] += actual_dmg
+
+        # --- Rounds Played & Survived (KAST) ---
+        r_death_names = set(r_deaths['user_name'].dropna())
+                               
+        for p in round_players:
+            init_player(p)
+            stats_per_player[p]["rounds_played"] += 1
+            
+            if p not in r_death_names:
+                round_kast_achieved.add(p)
+                
+            if p in round_kast_achieved:
+                stats_per_player[p]["kast_rounds"] += 1
+
+    # Final Percentage Math
+    for name, stats in stats_per_player.items():
+        rp = max(stats["rounds_played"], 1)
+        kills = max(stats["kills"], 1)
+        
+        stats["kast_pct"] = round((stats["kast_rounds"] / rp) * 100, 1)
+        stats["adr"] = round(stats["damage"] / rp, 1)
+        stats["hs_pct"] = round((stats["hs_kills"] / kills) * 100, 1)
+        stats["util_adr"] = round(stats["util_damage"] / rp, 1)
+
+    return stats_per_player
 
 
 def main():
@@ -715,7 +751,7 @@ def main():
   }
 
   print("Calculating Advanced Stats (ADR, KAST, 1vX)...")
-  advanced_stats = calculate_advanced_stats(parser)
+  advanced_stats = calculate_advanced_stats(parser, start_tick, end_tick)
 
   print("Processing Ticks & Events (this may take a while)...")
   ticks_data, player_lookup, steamid_map = process_ticks(parser, start_tick, end_tick)
@@ -723,12 +759,12 @@ def main():
 
   # Merge advanced stats into your player_lookup using the steamIDs
   for tiny_id, p_info in player_lookup.items():
-    sid_str = p_info["sid"]
-    # Convert to float/int to match the dataframe parsed IDs
-    sid_numeric = int(sid_str) if sid_str.isdigit() else float(sid_str)
+    p_name = p_info["name"]
 
-    if sid_numeric in advanced_stats:
-      p_info["advanced_stats"] = advanced_stats[sid_numeric]
+    if p_name in advanced_stats:
+      p_info["advanced_stats"] = advanced_stats[p_name]
+    else:
+      print(f"Warning: No advanced stats found for {p_name}")
 
   replay_json = {
     "meta": meta_payload,
@@ -746,7 +782,8 @@ def main():
   #     os.remove(meta_path)
 
   # Cleanup demo file
-  os.remove(demo_path)
+  # os.remove(demo_path)
+
 
 
 if __name__ == "__main__":
