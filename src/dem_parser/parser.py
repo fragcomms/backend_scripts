@@ -782,7 +782,7 @@ def main():
   #     os.remove(meta_path)
 
   # Cleanup demo file
-  # os.remove(demo_path)
+  os.remove(demo_path)
 
 
 
