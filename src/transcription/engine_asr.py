@@ -139,7 +139,7 @@ class ASREngine:
       # Phase 1b: GPU-bound transcription
       with torch.inference_mode():
         # batch_size=128 maxes out GPU throughput
-        results = self.model.transcribe(chunk_files, batch_size=128, num_workers=6)
+        results = self.model.transcribe(chunk_files, batch_size=16, num_workers=6)
         transcriptions = results[0] if isinstance(results, tuple) else results
 
       # Mapping results back to Discord IDs

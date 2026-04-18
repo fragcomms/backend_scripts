@@ -39,6 +39,8 @@ def extract_track(mka_path, track_index, output_wav):
     "-y",
     "-v",
     "error",
+    "-fflags", 
+    "+discardcorrupt",
     "-i",
     mka_path,
     "-map",
@@ -47,6 +49,8 @@ def extract_track(mka_path, track_index, output_wav):
     "16000",
     "-ac",
     "1",
+    "-c:a", 
+    "pcm_s16le",
     output_wav,
   ]
   try:
