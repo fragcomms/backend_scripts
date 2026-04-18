@@ -266,11 +266,11 @@ async def listen_to_process(process, task_name):
   finally:
     await process.wait()
     logger.info(f"[{task_name}] Process finished with code {process.returncode}")
-    
+
     context = TASK_CONTEXT.pop(task_name, {})
     job_id = context.get("job_id")
 
-    #crash
+    # crash
     if process.returncode != 0:
       if job_id and job_id in TASK_CONTEXT:
         logger.warning(f"Cleaning dead watcher: {job_id} due to {task_name} failure")
@@ -279,13 +279,14 @@ async def listen_to_process(process, task_name):
       if job_id and job_id in TASK_CONTEXT:
         watcher = TASK_CONTEXT[job_id]
         if watcher.get("transcript_done"):
-            await check_replay_watcher(job_id)
+          await check_replay_watcher(job_id)
         else:
-            logger.warning(f"[{task_name}] Audio was silent. Discarding job {job_id}.")
+          logger.warning(f"[{task_name}] Audio was silent. Discarding job {job_id}.")
 
-            # await db_pool.execute("DELETE FROM demos WHERE demo_id = $1", watcher.get("demo_id"))
-            
-            abort_job(job_id, "Audio contained no transcribable speech.")
+          # await db_pool.execute("DELETE FROM demos WHERE demo_id = $1", watcher.get("demo_id"))
+
+          abort_job(job_id, "Audio contained no transcribable speech.")
+
 
 async def launch_subprocess(cmd: list, task_name: str):
   # async method

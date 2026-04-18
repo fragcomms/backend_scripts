@@ -39,7 +39,7 @@ def extract_track(mka_path, track_index, output_wav):
     "-y",
     "-v",
     "error",
-    "-fflags", 
+    "-fflags",
     "+discardcorrupt",
     "-i",
     mka_path,
@@ -49,7 +49,7 @@ def extract_track(mka_path, track_index, output_wav):
     "16000",
     "-ac",
     "1",
-    "-c:a", 
+    "-c:a",
     "pcm_s16le",
     output_wav,
   ]
