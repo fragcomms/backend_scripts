@@ -745,9 +745,17 @@ def main():
   parser = DemoParser(demo_path)
 
   print("Parsing Metadata...")
-  start_tick, end_tick, map_name, winner, t_score, ct_score, winning_start_side = (
-    get_match_metadata(parser)
-  )
+  (
+    start_tick,
+    end_tick,
+    map_name,
+    winner,
+    t_score,
+    ct_score,
+    winning_start_side,
+    warmup_start_tick,
+    warmup_end_tick,
+  ) = get_match_metadata(parser)
 
   winner_name = "D"
   if winner == 2:
@@ -789,6 +797,7 @@ def main():
     "score_t": t_score,
     "score_ct": ct_score,
     "final_score": f"{t_score}:{ct_score}",
+    "warmup_ticks": warmup_end_tick - warmup_start_tick,
   }
 
   print("Calculating Advanced Stats (ADR, KAST, 1vX)...")
