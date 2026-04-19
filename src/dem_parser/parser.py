@@ -188,6 +188,20 @@ def get_match_metadata(parser):
   except Exception:
     pass
 
+  warmup_start_tick = -1
+  warmup_end_tick = -1
+  try:
+    warmup_start_df = parser.parse_event("warmup_period_start")
+    if not warmup_start_df.empty:
+      warmup_start_tick = int(warmup_start_df["tick"].iloc[0])
+
+    warmup_end_df = parser.parse_event("warmup_period_end")
+    if not warmup_end_df.empty:
+      # Use .iloc[-1] to get the last warmup end, in case it was restarted
+      warmup_end_tick = int(warmup_end_df["tick"].iloc[-1])
+  except Exception as e:
+    print(f"Warning: Could not fetch warmup events: {e}")
+
   winner_team = 0  # 2 = T, 3 = CT
   score_t = 0
   score_ct = 0
@@ -263,6 +277,8 @@ def get_match_metadata(parser):
     score_t,
     score_ct,
     winning_side_str,
+    warmup_start_tick,
+    warmup_end_tick,
   )
 
 
